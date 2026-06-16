@@ -185,7 +185,7 @@
             currentAngle: 0,
             cooldownTimer: 0,
             cooldownDuration: 350,
-            length: 80, // larger radius
+            length: 110, // increased radius
             trail: [],
             maxTrail: 25,
         };
@@ -269,14 +269,14 @@
             }
         }
 
-        function spawnSwordSlash(x, y, angle, count = 28) {
+        function spawnSwordSlash(x, y, angle, count = 32) {
             for (let i = 0; i < count; i++) {
-                const speed = 3 + Math.random() * 8;
-                const a = angle + (Math.random() - 0.5) * 1.0;
-                const size = 2 + Math.random() * 6;
+                const speed = 4 + Math.random() * 10;
+                const a = angle + (Math.random() - 0.5) * 1.2;
+                const size = 2 + Math.random() * 7;
                 particles.push({
-                    x: x + Math.cos(angle) * 40 + (Math.random() - 0.5) * 30,
-                    y: y + Math.sin(angle) * 40 + (Math.random() - 0.5) * 30,
+                    x: x + Math.cos(angle) * 50 + (Math.random() - 0.5) * 40,
+                    y: y + Math.sin(angle) * 50 + (Math.random() - 0.5) * 40,
                     vx: Math.cos(a) * speed * (0.7 + Math.random() * 0.5),
                     vy: Math.sin(a) * speed * (0.7 + Math.random() * 0.5),
                     life: 1,
@@ -319,12 +319,12 @@
             swordStatus.textContent = 'SWING!';
 
             // Spawn slash particles
-            spawnSwordSlash(player.x, player.y, angle, 30);
-            window.shakeAmount = 6;
-            window.shakeTimer = 150;
+            spawnSwordSlash(player.x, player.y, angle, 35);
+            window.shakeAmount = 8;
+            window.shakeTimer = 180;
 
             // Trail
-            for (let i = 0; i < 12; i++) {
+            for (let i = 0; i < 14; i++) {
                 sword.trail.push({ x: player.x, y: player.y, angle: angle, life: 1 });
                 if (sword.trail.length > sword.maxTrail) sword.trail.shift();
             }
@@ -424,7 +424,7 @@
             if (sword.swinging) {
                 sword.swingTimer -= dt;
                 const progress = 1 - (sword.swingTimer / sword.swingDuration);
-                const totalArc = 240; // degrees
+                const totalArc = 260; // degrees (increased)
                 const drawPhase = 0.25; // 25% of time for drawing
                 const swingPhase = 1 - drawPhase;
 
@@ -453,7 +453,7 @@
                     spawnSwordSlash(player.x, player.y, sword.currentAngle, 3);
                 }
 
-                // Trigger Flash at the peak of the fast swing (around 60% of swing phase)
+                // Trigger Flash at the peak of the fast swing
                 if (progress > 0.35 && progress < 0.45) {
                     flashAlpha = 1.0;
                 }
@@ -603,7 +603,7 @@
             for (const t of sword.trail) {
                 ctx.globalAlpha = t.life * 0.25;
                 ctx.strokeStyle = `hsl(40, 100%, 70%)`;
-                ctx.lineWidth = 4 * t.life;
+                ctx.lineWidth = 3 * t.life; // reduced thickness
                 ctx.shadowColor = `rgba(255, 200, 100, ${t.life * 0.3})`;
                 ctx.shadowBlur = 20;
                 const swx = t.x + Math.cos(t.angle) * sword.length;
@@ -616,7 +616,7 @@
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
 
-            // ---- Draw the Katana ----
+            // ---- Draw the Katana (held beside the player, following mouse) ----
             const handX = player.x + Math.cos(player.facing) * 22;
             const handY = player.y + Math.sin(player.facing) * 22;
             const swingProgress = sword.swinging ? 1 - (sword.swingTimer / sword.swingDuration) : 0;
@@ -722,7 +722,7 @@
             // ---- WHITE FLASH (Power indicator) ----
             if (flashAlpha > 0) {
                 ctx.save();
-                const gradFlash = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 450);
+                const gradFlash = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 500);
                 gradFlash.addColorStop(0, `rgba(255, 255, 255, ${flashAlpha * 0.9})`);
                 gradFlash.addColorStop(0.3, `rgba(255, 255, 255, ${flashAlpha * 0.5})`);
                 gradFlash.addColorStop(1, `rgba(255, 255, 255, 0)`);
@@ -730,12 +730,12 @@
                 ctx.fillRect(0, 0, W, H);
 
                 // Extra bright core
-                const coreGrad = ctx.createRadialGradient(player.x, player.y, 5, player.x, player.y, 120);
+                const coreGrad = ctx.createRadialGradient(player.x, player.y, 5, player.x, player.y, 150);
                 coreGrad.addColorStop(0, `rgba(255, 255, 255, ${flashAlpha * 0.6})`);
                 coreGrad.addColorStop(1, `rgba(255, 255, 255, 0)`);
                 ctx.fillStyle = coreGrad;
                 ctx.beginPath();
-                ctx.arc(player.x, player.y, 120, 0, Math.PI * 2);
+                ctx.arc(player.x, player.y, 150, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.restore();
             }
@@ -801,52 +801,50 @@
             }
         }
 
-        // ---------- DRAW KATANA ----------
+        // ---------- DRAW KATANA (thinner, elegant) ----------
         function drawKatana(ctx, x, y, angle, progress) {
             ctx.save();
             ctx.translate(x, y);
             ctx.rotate(angle);
 
-            // Handle (Tsuka) - 25px long
+            // Handle (Tsuka) - 25px long, thinner
             ctx.fillStyle = '#2c1a0e';
             ctx.shadowColor = 'rgba(0,0,0,0.3)';
             ctx.shadowBlur = 8;
-            ctx.fillRect(-8, -5, 25, 10);
+            ctx.fillRect(-8, -3, 25, 6); // thinner
 
-            // Handle wrapping
+            // Handle wrapping (thinner)
             ctx.shadowBlur = 0;
             ctx.strokeStyle = '#4a2a1a';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 1;
             for (let i = -4; i < 22; i += 3) {
                 ctx.beginPath();
-                ctx.moveTo(i, -5);
+                ctx.moveTo(i, -3);
                 ctx.lineTo(i + 1, 0);
-                ctx.lineTo(i, 5);
+                ctx.lineTo(i, 3);
                 ctx.stroke();
             }
 
-            // Guard (Tsuba)
+            // Guard (Tsuba) - thinner
             ctx.shadowBlur = 5;
             ctx.fillStyle = '#d4a843';
             ctx.beginPath();
-            ctx.ellipse(17, 0, 6, 9, 0, 0, Math.PI * 2);
+            ctx.ellipse(17, 0, 4, 7, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.strokeStyle = '#8a6e2a';
-            ctx.lineWidth = 1;
+            ctx.lineWidth = 0.8;
             ctx.stroke();
 
-            // Blade (Nagasa) - 60px long
+            // Blade (Nagasa) - 60px long, thinner
             ctx.shadowBlur = 10;
             ctx.shadowColor = 'rgba(255,255,255,0.1)';
             ctx.beginPath();
-            ctx.moveTo(17, -7);
-            // Curve to the tip
-            ctx.quadraticCurveTo(50, -10, 77, 0);
-            ctx.quadraticCurveTo(50, 10, 17, 7);
+            ctx.moveTo(17, -4);
+            ctx.quadraticCurveTo(50, -6, 77, 0);
+            ctx.quadraticCurveTo(50, 6, 17, 4);
             ctx.closePath();
 
-            // Blade gradient
-            let grad = ctx.createLinearGradient(17, -7, 17, 7);
+            let grad = ctx.createLinearGradient(17, -4, 17, 4);
             grad.addColorStop(0, '#b0b8c4');
             grad.addColorStop(0.3, '#ffffff');
             grad.addColorStop(0.7, '#ffffff');
@@ -857,21 +855,21 @@
             ctx.lineWidth = 0.5;
             ctx.stroke();
 
-            // Blade edge (Hamon) - wavy
+            // Blade edge (Hamon) - thinner wave
             ctx.beginPath();
-            ctx.moveTo(17, -2);
+            ctx.moveTo(17, -1);
             for (let i = 19; i < 77; i += 2) {
-                const wave = Math.sin(i * 0.7 + 1) * 2.5;
-                ctx.lineTo(i, -2 + wave);
+                const wave = Math.sin(i * 0.7 + 1) * 1.8;
+                ctx.lineTo(i, -1 + wave);
             }
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 1;
             ctx.shadowBlur = 0;
             ctx.stroke();
 
             // Tip (Kissaki)
             ctx.beginPath();
-            ctx.arc(77, 0, 3, 0, Math.PI * 2);
+            ctx.arc(77, 0, 2, 0, Math.PI * 2);
             ctx.fillStyle = '#e0e5ec';
             ctx.shadowBlur = 8;
             ctx.shadowColor = 'rgba(255,255,255,0.3)';
@@ -991,7 +989,6 @@
                     joystick.angle = Math.atan2(joystick.dy, joystick.dx);
                     // Update facing towards joystick touch
                     if (activePointer) {
-                        // If pointer exists, it might be the movement touch. Update its position.
                         if (activePointer.id === touch.identifier) {
                             activePointer.x = x;
                             activePointer.y = y;
@@ -1028,7 +1025,6 @@
             e.preventDefault();
             const touches = e.touches;
 
-            // Check if joystick touch ended
             if (joystick.active) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
@@ -1038,7 +1034,6 @@
                     }
                 }
                 if (!found) {
-                    // Release joystick -> SWING!
                     if (joystick.active) {
                         performSwordSwing(joystick.angle);
                     }
@@ -1049,7 +1044,6 @@
                 }
             }
 
-            // Check if movement touch ended
             if (activePointer) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
