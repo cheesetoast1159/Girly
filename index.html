@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Physics Platformer</title>
+    <style>
+        /* ── Reset & Base ── */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0b0e17;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            user-select: none;
+        }
+
+        /* ── Game Container ── */
+        #gameContainer {
+            background: #141824;
+            padding: 20px 20px 18px;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        /* ── Canvas ── */
+        #gameCanvas {
+            display: block;
+            width: 900px;
+            height: 500px;
+            border-radius: 14px;
+            background: #1a1f2e;
+            box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
+            cursor: default;
+            image-rendering: pixelated;
+        }
+
+        /* ── HUD Bar ── */
+        #hud {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 14px;
+            padding: 0 6px;
+            color: #8e9bb5;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+        }
+
+        #hud .controls {
+            display: flex;
+            gap: 18px;
+            align-items: center;
+        }
+
+        #hud .controls kbd {
+            background: #222a3a;
+            padding: 4px 10px;
+            border-radius: 6px;
+            color: #c8d2e6;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid #303b4f;
+            box-shadow: 0 2px 0 #0b0e17;
+        }
+
+        #hud .stats {
+            display: flex;
+            gap: 22px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        #hud .stats span {
+            color: #5e6f8a;
+        }
+
+        #hud .stats .value {
+            color: #bcc8e0;
+            font-weight: 600;
+            min-width: 48px;
+            display: inline-block;
+        }
+
+        /* ── Responsive ── */
+        @media (max-width: 940px) {
+            #gameCanvas {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 900 / 500;
+            }
+            #gameContainer {
+                padding: 14px;
+                border-radius: 18px;
+                margin: 10px;
+            }
+            #hud {
+                flex-wrap: wrap;
+                gap: 8px;
+                font-size: 12px;
+            }
+            #hud .controls {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            #hud .stats {
+                gap: 14px;
+                flex-wrap: wrap;
+            }
+        }
+
+        @media (max-width: 500px) {
+            #hud .controls kbd {
+                padding: 2px 8px;
+                font-size: 10px;
+            }
+            #hud .stats .value {
+                min-width: 32px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="900" height="500"></canvas>
+
+        <div id="hud">
+            <div class="controls">
+                <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd>
+                <span style="color:#5e6f8a;margin:0 2px;">·</span>
+                <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> to jump
+            </div>
+            <div class="stats">
+                <span>pos <span class="value" id="posDisplay">0, 0</span></span>
+                <span>vel <span class="value" id="velDisplay">0, 0</span></span>
+                <span>state <span class="value" id="stateDisplay">ground</span></span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        //  PHYSICS PLATFORMER  –  full 2D engine with realistic physics
+        // ═══════════════════════════════════════════════════════════════════
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // ── HUD elements ──
+        const posDisplay = document.getElementById('posDisplay');
+        const velDisplay = document.getElementById('velDisplay');
+        const stateDisplay = document.getElementById('stateDisplay');
+
+        // ── Constants ──
+        const GRAVITY = 620; // px/s²  (≈ 0.63× Earth gravity, feels snappy)
+        const JUMP_SPEED = 400; // px/s   upward velocity at jump
+        const MOVE_ACCEL = 900; // px/s²  ground acceleration
+        const MAX_SPEED = 300; // px/s   max horizontal speed
+        const GROUND_FRICTION = 0.88; // deceleration multiplier per second (ground)
+        const AIR_FRICTION = 0.97; // deceleration multiplier per second (air)
+        const AIR_CONTROL = 0.55; // acceleration multiplier in air
+        const COYOTE_TIME = 0.08; // seconds after leaving ground you can still jump
+        const JUMP_BUFFER_TIME = 0.10; // seconds before landing you can buffer a jump
+        const MAX_FALL_SPEED = 550; // px/s   terminal velocity
+        const PLAYER_W = 28;
+        const PLAYER_H = 36;
+
+        // ── World ──
+        const GROUND_Y = 440; // y-coordinate of the ground surface
+        const WORLD_W = 900;
+        const WORLD_H = 500;
+
+        // ── Platforms ──
+        const platforms = [
+            { x: 120, y: 350, w: 130, h: 14 },
+            { x: 360, y: 280, w: 110, h: 14 },
+            { x: 560, y: 210, w: 120, h: 14 },
+            { x: 740, y: 290, w: 110, h: 14 },
+            { x: 40, y: 200, w: 100, h: 14 },
+        ];
+
+        // ── Player state ──
+        const player = {
+            x: 120,
+            y: GROUND_Y - PLAYER_H,
+            w: PLAYER_W,
+            h: PLAYER_H,
+            vx: 0,
+            vy: 0,
+            onGround: false,
+            jumpCount: 0,
+            coyoteTimer: 0,
+            bufferTimer: 0,
+            facing: 1, // 1 = right, -1 = left
+            // Animation / visual
+            walkCycle: 0,
+            eyeBlink: 0,
+        };
+
+        // ── Input ──
+        const keys = {
+            left: false,
+            right: false,
+            jump: false,
+            jumpPressed: false, // edge-triggered
+        };
+
+        // ── Particles (simple dust / trail) ──
+        let particles = [];
+
+        // ── Timestamp ──
+        let lastTime = 0;
+
+        // ──────────────────────────────────────────────────────────────
+        //  INPUT HANDLING
+        // ──────────────────────────────────────────────────────────────
+
+        document.addEventListener('keydown', (e) => {
+            const key = e.key;
+            // Prevent page scroll / default actions
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D']
+                .includes(key) || key === ' ') {
+                e.preventDefault();
+            }
+
+            if (key === 'ArrowLeft' || key === 'a' || key === 'A') keys.left = true;
+            if (key === 'ArrowRight' || key === 'd' || key === 'D') keys.right = true;
+            if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === ' ' || key === 'Space') {
+                if (!keys.jump) keys.jumpPressed = true;
+                keys.jump = true;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            const key = e.key;
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D']
+                .includes(key) || key === ' ') {
+                e.preventDefault();
+            }
+
+            if (key === 'ArrowLeft' || key === 'a' || key === 'A') keys.left = false;
+            if (key === 'ArrowRight' || key === 'd' || key === 'D') keys.right = false;
+            if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === ' ' || key === 'Space') {
+                keys.jump = false;
+            }
+        });
+
+        // Also handle window blur to release keys
+        window.addEventListener('blur', () => {
+            keys.left = false;
+            keys.right = false;
+            keys.jump = false;
+            keys.jumpPressed = false;
+        });
+
+        // ──────────────────────────────────────────────────────────────
+        //  PHYSICS UPDATE
+        // ──────────────────────────────────────────────────────────────
+
+        function updatePhysics(dt) {
+            // Clamp dt to avoid physics explosions
+            const dtClamped = Math.min(dt, 0.035);
+            const p = player;
+
+            // ── Coyote timer ──
+            if (p.onGround) {
+                p.coyoteTimer = COYOTE_TIME;
+            } else {
+                p.coyoteTimer -= dtClamped;
+            }
+
+            // ── Jump buffer ──
+            if (keys.jumpPressed) {
+                p.bufferTimer = JUMP_BUFFER_TIME;
+                keys.jumpPressed = false;
+            }
+            if (p.bufferTimer > 0) {
+                p.bufferTimer -= dtClamped;
+            }
+
+            // ── Horizontal movement ──
+            const accel = p.onGround ? MOVE_ACCEL : MOVE_ACCEL * AIR_CONTROL;
+            const friction = p.onGround ? GROUND_FRICTION : AIR_FRICTION;
+
+            if (keys.left) {
+                p.vx -= accel * dtClamped;
+                p.facing = -1;
+            }
+            if (keys.right) {
+                p.vx += accel * dtClamped;
+                p.facing = 1;
+            }
+
+            // Apply friction (only when not actively moving in the direction of velocity)
+            if (!keys.left && !keys.right) {
+                p.vx *= Math.pow(friction, dtClamped * 60);
+            } else {
+                // If moving opposite to input, extra friction to help turn
+                if ((keys.left && p.vx > 0) || (keys.right && p.vx < 0)) {
+                    p.vx *= Math.pow(0.92, dtClamped * 60);
+                }
+            }
+
+            // Clamp horizontal speed
+            if (Math.abs(p.vx) > MAX_SPEED) {
+                p.vx = Math.sign(p.vx) * MAX_SPEED;
+            }
+            // Dead zone – stop micro-movement
+            if (Math.abs(p.vx) < 0.5) p.vx = 0;
+
+            // ── Gravity ──
+            p.vy += GRAVITY * dtClamped;
+            if (p.vy > MAX_FALL_SPEED) p.vy = MAX_FALL_SPEED;
+
+            // ── Jump ──
+            const canJump = p.coyoteTimer > 0 && p.bufferTimer > 0;
+            if (canJump) {
+                p.vy = -JUMP_SPEED;
+                p.onGround = false;
+                p.coyoteTimer = 0;
+                p.bufferTimer = 0;
+                p.jumpCount += 1;
+                // Spawn dust particles on jump
+                spawnDust(p.x + p.w / 2, p.y + p.h, 6, '#aac9ff');
+            }
+
+            // ── Variable jump height ──
+            // If jump key is released while going up, cut the upward velocity
+            if (!keys.jump && p.vy < 0) {
+                p.vy *= 0.70;
+                // If we cut it, also reduce the jump count effect
+            }
+
+            // ── Move X ──
+            p.x += p.vx * dtClamped;
+
+            // ── Move Y ──
+            p.y += p.vy * dtClamped;
+
+            // ── Collision: platforms + ground ──
+
+            // First, assume not on ground
+            p.onGround = false;
+
+            // ── Platform collision ──
+            for (const plat of platforms) {
+                const px = p.x,
+                    py = p.y,
+                    pw = p.w,
+                    ph = p.h;
+                const overlapX = px + pw > plat.x && px < plat.x + plat.w;
+                const overlapY = py + ph > plat.y && py < plat.y + plat.h;
+                if (!overlapX || !overlapY) continue;
+
+                // Determine which side the player is approaching from
+                const overlapTop = (py + ph) - plat.y;
+                const overlapBottom = (plat.y + plat.h) - py;
+                const overlapLeft = (px + pw) - plat.x;
+                const overlapRight = (plat.x + plat.w) - px;
+
+                const minOverlap = Math.min(overlapTop, overlapBottom, overlapLeft, overlapRight);
+
+                if (minOverlap === overlapTop && p.vy >= 0) {
+                    // Landing on top
+                    p.y = plat.y - p.h;
+                    p.vy = 0;
+                    p.onGround = true;
+                    p.coyoteTimer = COYOTE_TIME;
+                } else if (minOverlap === overlapBottom && p.vy < 0) {
+                    // Hitting bottom (head)
+                    p.y = plat.y + plat.h;
+                    p.vy = 0;
+                } else if (minOverlap === overlapLeft && p.vx > 0) {
+                    // Hitting left side
+                    p.x = plat.x - p.w;
+                    p.vx = 0;
+                } else if (minOverlap === overlapRight && p.vx < 0) {
+                    // Hitting right side
+                    p.x = plat.x + plat.w;
+                    p.vx = 0;
+                }
+            }
+
+            // ── Ground collision ──
+            if (p.y + p.h > GROUND_Y) {
+                p.y = GROUND_Y - p.h;
+                p.vy = 0;
+                p.onGround = true;
+                p.coyoteTimer = COYOTE_TIME;
+            }
+
+            // ── World bounds (left/right walls) ──
+            if (p.x < 0) { p.x = 0;
+                p.vx = 0; }
+            if (p.x + p.w > WORLD_W) { p.x = WORLD_W - p.w;
+                p.vx = 0; }
+
+            // ── Fall death ──
+            if (p.y > WORLD_H + 100) {
+                // Respawn
+                p.x = 120;
+                p.y = GROUND_Y - p.h;
+                p.vx = 0;
+                p.vy = 0;
+                p.onGround = true;
+                p.coyoteTimer = COYOTE_TIME;
+                particles = [];
+            }
+
+            // ── Walk cycle ──
+            if (Math.abs(p.vx) > 10 && p.onGround) {
+                p.walkCycle += dtClamped * Math.abs(p.vx) * 0.04;
+                // Spawn dust while running
+                if (Math.random() < 0.3) {
+                    spawnDust(
+                        p.x + (p.facing === 1 ? 0 : p.w),
+                        p.y + p.h - 2,
+                        1,
+                        'rgba(200,215,240,0.25)'
+                    );
+                }
+            } else if (p.onGround) {
+                p.walkCycle *= 0.92;
+            }
+
+            // ── Eye blink ──
+            p.eyeBlink += dtClamped;
+            if (p.eyeBlink > 3.5 + Math.random() * 2) p.eyeBlink = 0;
+
+            // ── Update particles ──
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const pt = particles[i];
+                pt.x += pt.vx * dtClamped;
+                pt.y += pt.vy * dtClamped;
+                pt.vy += 60 * dtClamped;
+                pt.life -= dtClamped;
+                pt.size *= 0.995;
+                if (pt.life <= 0 || pt.size < 0.3) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // ── HUD update ──
+            posDisplay.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}`;
+            velDisplay.textContent = `${Math.round(p.vx)}, ${Math.round(p.vy)}`;
+            stateDisplay.textContent = p.onGround ? 'ground' : (p.vy < 0 ? 'rising' : 'falling');
+            stateDisplay.style.color = p.onGround ? '#7ae0a0' : (p.vy < 0 ? '#ffd57a' : '#ff8a8a');
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  PARTICLES
+        // ──────────────────────────────────────────────────────────────
+
+        function spawnDust(x, y, count, color) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 12,
+                    y: y + (Math.random() - 0.5) * 6,
+                    vx: (Math.random() - 0.5) * 80,
+                    vy: -Math.random() * 60 - 20,
+                    size: 2 + Math.random() * 4,
+                    life: 0.4 + Math.random() * 0.5,
+                    maxLife: 0.9,
+                    color: color || 'rgba(180,200,230,0.3)',
+                });
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  RENDER
+        // ──────────────────────────────────────────────────────────────
+
+        function render() {
+            const p = player;
+
+            // ── Clear ──
+            ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+
+            // ── Sky gradient ──
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+            skyGrad.addColorStop(0, '#0f1729');
+            skyGrad.addColorStop(0.5, '#1a2540');
+            skyGrad.addColorStop(1, '#28345a');
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, WORLD_W, GROUND_Y);
+
+            // ── Stars ──
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            const seed = 42;
+            for (let i = 0; i < 60; i++) {
+                const sx = ((i * 137 + seed) % WORLD_W);
+                const sy = ((i * 251 + seed * 3) % (GROUND_Y - 20));
+                const ss = ((i * 31) % 3) * 0.4 + 0.4;
+                ctx.globalAlpha = 0.3 + ((i * 17) % 5) * 0.1;
+                ctx.beginPath();
+                ctx.arc(sx, sy, ss, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // ── Ground ──
+            // Main ground
+            ctx.fillStyle = '#2c3d5a';
+            ctx.fillRect(0, GROUND_Y, WORLD_W, WORLD_H - GROUND_Y);
+
+            // Grass strip
+            ctx.fillStyle = '#3f5a3a';
+            ctx.fillRect(0, GROUND_Y - 3, WORLD_W, 6);
+
+            // Grass blades
+            ctx.strokeStyle = '#4d6e47';
+            ctx.lineWidth = 1.5;
+            for (let i = 0; i < WORLD_W; i += 6) {
+                const h = 4 + ((i * 37) % 7);
+                ctx.beginPath();
+                ctx.moveTo(i, GROUND_Y - 1);
+                ctx.lineTo(i + (i % 3 === 0 ? -1 : 1), GROUND_Y - 1 - h);
+                ctx.stroke();
+            }
+
+            // Ground highlight line
+            ctx.fillStyle = 'rgba(255,255,255,0.04)';
+            ctx.fillRect(0, GROUND_Y - 1, WORLD_W, 1);
+
+            // ── Platforms ──
+            for (const plat of platforms) {
+                // Shadow
+                ctx.fillStyle = 'rgba(0,0,0,0.25)';
+                ctx.fillRect(plat.x + 3, plat.y + 4, plat.w, plat.h);
+
+                // Main body
+                const grad = ctx.createLinearGradient(plat.x, plat.y, plat.x, plat.y + plat.h);
+                grad.addColorStop(0, '#4a6a8a');
+                grad.addColorStop(0.4, '#3a5a78');
+                grad.addColorStop(1, '#2a4a68');
+                ctx.fillStyle = grad;
+                ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+
+                // Top highlight
+                ctx.fillStyle = 'rgba(255,255,255,0.15)';
+                ctx.fillRect(plat.x + 4, plat.y + 1, plat.w - 8, 3);
+
+                // Top edge glow
+                ctx.fillStyle = 'rgba(120,200,255,0.08)';
+                ctx.fillRect(plat.x, plat.y, plat.w, 1);
+
+                // Edge accents
+                ctx.fillStyle = 'rgba(255,255,255,0.05)';
+                ctx.fillRect(plat.x, plat.y + 2, 3, plat.h - 4);
+                ctx.fillRect(plat.x + plat.w - 3, plat.y + 2, 3, plat.h - 4);
+            }
+
+            // ── Particles ──
+            for (const pt of particles) {
+                const alpha = pt.life / pt.maxLife;
+                ctx.globalAlpha = alpha * 0.7;
+                ctx.fillStyle = pt.color || 'rgba(180,200,230,0.3)';
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, pt.size * 0.8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // ── Player ──
+            drawPlayer(p);
+
+            // ── Vignette ──
+            const vignette = ctx.createRadialGradient(
+                WORLD_W / 2, WORLD_H / 2, WORLD_H * 0.3,
+                WORLD_W / 2, WORLD_H / 2, WORLD_H * 0.95
+            );
+            vignette.addColorStop(0, 'rgba(0,0,0,0)');
+            vignette.addColorStop(1, 'rgba(0,0,0,0.25)');
+            ctx.fillStyle = vignette;
+            ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  DRAW PLAYER
+        // ──────────────────────────────────────────────────────────────
+
+        function drawPlayer(p) {
+            const x = p.x,
+                y = p.y,
+                w = p.w,
+                h = p.h;
+            const f = p.facing;
+
+            ctx.save();
+
+            // ── Shadow ──
+            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            ctx.beginPath();
+            ctx.ellipse(x + w / 2, y + h + 2, w * 0.6, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ── Body ──
+            const bodyGrad = ctx.createLinearGradient(x, y, x + w, y + h);
+            bodyGrad.addColorStop(0, '#6ac9ff');
+            bodyGrad.addColorStop(0.4, '#4ab0f0');
+            bodyGrad.addColorStop(1, '#2a8fd0');
+            ctx.fillStyle = bodyGrad;
+            ctx.shadowColor = 'rgba(60,180,255,0.2)';
+            ctx.shadowBlur = 12;
+
+            // Rounded body
+            const r = 4;
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.quadraticCurveTo(x, y, x, y + r);
+            ctx.lineTo(x, y + h - r);
+            ctx.quadraticCurveTo(x, y + h, x + r, y + h);
+            ctx.lineTo(x + w - r, y + h);
+            ctx.quadraticCurveTo(x + w, y + h, x + w, y + h - r);
+            ctx.lineTo(x + w, y + r);
+            ctx.quadraticCurveTo(x + w, y, x + w - r, y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Body highlight (top)
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = 'rgba(255,255,255,0.20)';
+            ctx.fillRect(x + 6, y + 3, w - 12, 5);
+
+            // ── Belt / detail ──
+            ctx.fillStyle = 'rgba(255,255,255,0.08)';
+            ctx.fillRect(x + 4, y + h * 0.55, w - 8, 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            ctx.fillRect(x + 2, y + h * 0.7, w - 4, 1);
+
+            // ── Head ──
+            const headSize = w * 0.85;
+            const headX = x + (w - headSize) / 2;
+            const headY = y - headSize * 0.5;
+
+            // Head shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.08)';
+            ctx.beginPath();
+            ctx.ellipse(headX + headSize / 2, headY + headSize * 0.6, headSize * 0.5, headSize * 0.2, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Head circle
+            const headGrad = ctx.createRadialGradient(
+                headX + headSize * 0.3, headY + headSize * 0.2, 2,
+                headX + headSize * 0.5, headY + headSize * 0.5, headSize * 0.7
+            );
+            headGrad.addColorStop(0, '#ffddb0');
+            headGrad.addColorStop(0.7, '#f5c89a');
+            headGrad.addColorStop(1, '#e0b080');
+            ctx.fillStyle = headGrad;
+            ctx.shadowColor = 'rgba(0,0,0,0.1)';
+            ctx.shadowBlur = 6;
+            ctx.beginPath();
+            ctx.arc(headX + headSize / 2, headY + headSize / 2, headSize * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ── Eyes ──
+            ctx.shadowBlur = 0;
+            const eyeY = headY + headSize * 0.40;
+            const eyeSpacing = headSize * 0.20;
+
+            // White of eyes
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.ellipse(headX + headSize / 2 - eyeSpacing + (f === 1 ? 1 : -1), eyeY, 4.5, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(headX + headSize / 2 + eyeSpacing + (f === 1 ? 1 : -1), eyeY, 4.5, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Pupils (look in facing direction)
+            const pupilOff = f * 2;
+            ctx.fillStyle = '#1a2a3a';
+            ctx.beginPath();
+            ctx.arc(headX + headSize / 2 - eyeSpacing + pupilOff + (f === 1 ? 1 : -1), eyeY + 0.5, 2.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(headX + headSize / 2 + eyeSpacing + pupilOff + (f === 1 ? 1 : -1), eyeY + 0.5, 2.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Eye shine
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.beginPath();
+            ctx.arc(headX + headSize / 2 - eyeSpacing + pupilOff + 1.5 + (f === 1 ? 1 : -1), eyeY - 1.5, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(headX + headSize / 2 + eyeSpacing + pupilOff + 1.5 + (f === 1 ? 1 : -1), eyeY - 1.5, 1.2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ── Mouth ──
+            const mouthY = eyeY + headSize * 0.35;
+            ctx.strokeStyle = '#c07050';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            if (p.vy < -50) {
+                // Happy / jumping
+                ctx.arc(headX + headSize / 2, mouthY - 1, 5, 0, Math.PI);
+            } else if (p.vy > 100) {
+                // Scared / falling
+                ctx.ellipse(headX + headSize / 2, mouthY + 2, 4, 3, 0, 0, Math.PI * 2);
+            } else {
+                // Neutral smile
+                ctx.arc(headX + headSize / 2, mouthY, 5, 0.1, Math.PI - 0.1);
+            }
+            ctx.stroke();
+
+            // ── Blush ──
+            ctx.fillStyle = 'rgba(255,150,150,0.18)';
+            ctx.beginPath();
+            ctx.ellipse(headX + headSize * 0.15, eyeY + headSize * 0.4, 4, 3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(headX + headSize * 0.85, eyeY + headSize * 0.4, 4, 3, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ── Legs (simple) ──
+            ctx.shadowBlur = 0;
+            const legOffset = p.onGround ? Math.sin(p.walkCycle) * 2 : 0;
+            ctx.fillStyle = '#2a4a6a';
+            ctx.fillRect(x + 4, y + h - 4, 6, 4 + legOffset * 0.5);
+            ctx.fillRect(x + w - 10, y + h - 4, 6, 4 - legOffset * 0.5);
+
+            // ── Arms (simple) ──
+            ctx.fillStyle = '#f5c89a';
+            const armSwing = p.onGround ? Math.sin(p.walkCycle + 0.5) * 3 : -4;
+            ctx.fillRect(x - 3, y + 8 + armSwing * 0.3, 4, 10);
+            ctx.fillRect(x + w - 1, y + 8 - armSwing * 0.3, 4, 10);
+
+            ctx.restore();
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  GAME LOOP
+        // ──────────────────────────────────────────────────────────────
+
+        function gameLoop(timestamp) {
+            const dt = lastTime ? Math.min((timestamp - lastTime) / 1000, 0.05) : 1 / 60;
+            lastTime = timestamp;
+
+            updatePhysics(dt);
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  START
+        // ──────────────────────────────────────────────────────────────
+
+        // Initial spawn particles
+        for (let i = 0; i < 12; i++) {
+            spawnDust(
+                player.x + player.w / 2 + (Math.random() - 0.5) * 40,
+                player.y + player.h,
+                1,
+                'rgba(180,200,230,0.15)'
+            );
+        }
+
+        requestAnimationFrame(gameLoop);
+    </script>
+
+</body>
+</html>
