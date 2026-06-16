@@ -1,529 +1,876 @@
-<!DOCTYPE html><!DOCTYPE html>
-<html>
-<head>
-    <title>2D Movement Game</title>
-    <style>
-        /* styles */
-    </style>
-</head>
-<body>
-    <canvas id="game"></canvas>
-    <script>
-        // game logic
-    </script>
-</body>
-</html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Bland Mobile Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>2D Dash Movement</title>
     <style>
-        /* ── Reset & Fullscreen ── */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            user-select: none;
-            -webkit-touch-callout: none;
-            -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            background: #111;
+            background: #0a0e17;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            width: 100vw;
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             overflow: hidden;
-            font-family: system-ui, sans-serif;
-            touch-action: none;
         }
 
-        #gameContainer {
-            position: relative;
-            width: 100%;
-            max-width: 500px;
-            aspect-ratio: 500 / 700; /* tall mobile view */
-            background: #1a1a1a;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 0 30px rgba(0,0,0,0.7);
+        .game-wrapper {
+            background: #111927;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 180, 255, 0.05);
+            border: 1px solid rgba(0, 180, 255, 0.08);
         }
 
-        /* ── Canvas ── */
-        #gameCanvas {
+        canvas {
             display: block;
-            width: 100%;
-            height: 100%;
-            background: #222;
-            touch-action: none;
+            border-radius: 12px;
+            background: #0d1520;
+            width: 900px;
+            height: 600px;
+            box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.6);
         }
 
-        /* ── Button overlay ── */
-        #controls {
-            position: absolute;
-            bottom: 20px;
-            left: 0;
-            right: 0;
+        .controls {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0 16px;
-            pointer-events: none; /* let clicks pass to canvas? No, we want buttons to work */
-            pointer-events: none; /* we'll set pointer-events on children */
+            margin-top: 16px;
+            padding: 0 8px;
+            color: #6a8ba0;
+            font-size: 13px;
+            letter-spacing: 0.3px;
         }
 
-        .btn-group {
+        .controls .keys {
             display: flex;
-            gap: 14px;
-            pointer-events: auto;
-        }
-
-        .btn {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 60px;
-            color: #eee;
-            font-size: 26px;
-            font-weight: bold;
-            width: 70px;
-            height: 70px;
-            display: flex;
-            justify-content: center;
+            gap: 20px;
             align-items: center;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            touch-action: none;
-            transition: background 0.05s;
-            cursor: pointer;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-            letter-spacing: 0.5px;
         }
 
-        .btn:active {
-            background: rgba(255, 255, 255, 0.3);
-            transform: scale(0.94);
+        .controls .keys kbd {
+            background: #1a2635;
+            padding: 4px 10px;
+            border-radius: 6px;
+            color: #b0d4e8;
+            font-size: 12px;
+            border: 1px solid #2a3a4a;
+            box-shadow: 0 2px 0 #0a121a;
+            font-weight: 600;
         }
 
-        .btn-jump {
-            width: 90px;
-            height: 90px;
-            background: rgba(70, 130, 255, 0.25);
-            border-color: rgba(70, 130, 255, 0.3);
-            font-size: 30px;
+        .controls .keys span {
+            color: #4a6a7a;
         }
 
-        .btn-jump:active {
-            background: rgba(70, 130, 255, 0.5);
+        .controls .status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
         }
 
-        /* ── Responsive sizing ── */
-        @media (max-width: 500px) {
-            .btn {
-                width: 60px;
-                height: 60px;
-                font-size: 22px;
+        .controls .status .indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .controls .status .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .dot.ready {
+            background: #00e676;
+            box-shadow: 0 0 12px rgba(0, 230, 118, 0.4);
+        }
+        .dot.cooldown {
+            background: #ff5252;
+            box-shadow: 0 0 12px rgba(255, 82, 82, 0.4);
+        }
+
+        @media (max-width: 960px) {
+            canvas {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 900 / 600;
             }
-            .btn-jump {
-                width: 75px;
-                height: 75px;
-                font-size: 26px;
+            .game-wrapper {
+                padding: 12px;
+                margin: 10px;
+                border-radius: 14px;
             }
-            #controls {
-                bottom: 14px;
-                padding: 0 10px;
+            .controls {
+                flex-wrap: wrap;
+                gap: 10px;
+                justify-content: center;
+                font-size: 12px;
             }
-            .btn-group {
+            .controls .keys {
+                flex-wrap: wrap;
+                justify-content: center;
                 gap: 10px;
             }
-        }
-
-        @media (max-width: 380px) {
-            .btn {
-                width: 50px;
-                height: 50px;
-                font-size: 18px;
-            }
-            .btn-jump {
-                width: 65px;
-                height: 65px;
-                font-size: 22px;
-            }
-        }
-
-        /* ── HUD (minimal) ── */
-        #hud {
-            position: absolute;
-            top: 12px;
-            left: 16px;
-            color: #888;
-            font-size: 12px;
-            font-weight: 400;
-            pointer-events: none;
-            font-family: monospace;
-            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
-        }
-        #hud span {
-            display: inline-block;
-            margin-right: 12px;
-        }
-        .hud-value {
-            color: #bbb;
         }
     </style>
 </head>
 <body>
-    <div id="gameContainer">
-        <canvas id="gameCanvas" width="500" height="700"></canvas>
 
-        <!-- HUD -->
-        <div id="hud">
-            <span>pos <span class="hud-value" id="posDisplay">0,0</span></span>
-            <span>vel <span class="hud-value" id="velDisplay">0,0</span></span>
-        </div>
-
-        <!-- Controls -->
-        <div id="controls">
-            <div class="btn-group">
-                <div class="btn" id="btnLeft">◀</div>
-                <div class="btn" id="btnRight">▶</div>
+    <div class="game-wrapper">
+        <canvas id="game" width="900" height="600"></canvas>
+        <div class="controls">
+            <div class="keys">
+                <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>
+                <span>or</span>
+                <kbd>↑</kbd> <kbd>←</kbd> <kbd>↓</kbd> <kbd>→</kbd>
+                <span style="color: #3a5a6a; margin: 0 4px;">·</span>
+                <kbd style="background:#1a2a3a; border-color:#3a6a8a;">SPACE</kbd>
+                <span style="color: #4a8aaa;">DASH</span>
             </div>
-            <div class="btn-group">
-                <div class="btn btn-jump" id="btnJump">▲</div>
+            <div class="status">
+                <div class="indicator">
+                    <span style="color:#4a7a8a;">DASH</span>
+                    <span class="dot ready" id="dashDot"></span>
+                </div>
+                <div class="indicator">
+                    <span style="color:#4a7a8a;">SPEED</span>
+                    <span id="speedDisplay" style="color:#8ac4e0; font-weight:600; min-width:40px;">0</span>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        // ═══════════════════════════════════════════════════════════════════
-        //  BLAND MOBILE PLATFORMER  –  minimal, rectangle character,
-        //  empty room with high ceiling, one small floating platform.
-        // ═══════════════════════════════════════════════════════════════════
-
-        const canvas = document.getElementById('gameCanvas');
+        const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
+        const dashDot = document.getElementById('dashDot');
+        const speedDisplay = document.getElementById('speedDisplay');
 
-        // HUD elements
-        const posDisplay = document.getElementById('posDisplay');
-        const velDisplay = document.getElementById('velDisplay');
+        const W = 900,
+            H = 600;
 
-        // ── Canvas dimensions ──
-        const W = 500;
-        const H = 700;
-        canvas.width = W;
-        canvas.height = H;
-
-        // ── Physics constants (tuned for mobile feel) ──
-        const GRAVITY = 580;       // px/s²
-        const JUMP_SPEED = 380;    // px/s
-        const MOVE_ACCEL = 800;    // px/s²
-        const MAX_SPEED = 280;     // px/s
-        const GROUND_FRICTION = 0.88;
-        const AIR_FRICTION = 0.97;
-        const AIR_CONTROL = 0.50;
-        const COYOTE_TIME = 0.07;  // seconds
-        const JUMP_BUFFER_TIME = 0.08;
-        const MAX_FALL_SPEED = 500;
-        const PLAYER_W = 24;
-        const PLAYER_H = 34;
-
-        // ── World ──
-        const GROUND_Y = 620;      // ground surface
-        const CEILING_Y = 40;      // invisible ceiling (player can't go above)
-        const PLATFORM = { x: 200, y: 380, w: 100, h: 12 }; // one small platform
-
-        // ── Player ──
+        // ---------- PLAYER ----------
         const player = {
-            x: 240,
-            y: GROUND_Y - PLAYER_H,
-            w: PLAYER_W,
-            h: PLAYER_H,
+            x: W / 2,
+            y: H / 2,
+            radius: 18,
+            speed: 3.2,
             vx: 0,
             vy: 0,
-            onGround: false,
-            coyoteTimer: 0,
-            bufferTimer: 0,
+            friction: 0.88,
+            accel: 0.45,
+
+            // facing: angle in radians, 0 = right, PI/2 = down
+            facing: Math.PI / 2, // starts facing down
+
+            // dash
+            isDashing: false,
+            dashMultiplier: 1,
+            dashDuration: 280, // ms
+            dashCooldown: 1400, // ms
+            dashTimer: 0,
+            cooldownTimer: 0,
+            dashSpeedBoost: 6.5,
+
+            // trail
+            trail: [],
+            maxTrail: 28,
+
+            // invincibility flash (just for visual)
+            flashTimer: 0,
         };
 
-        // ── Input state (touch) ──
-        const input = {
+        // ---------- PARTICLES ----------
+        let particles = [];
+
+        // ---------- INPUT ----------
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false,
+            up: false,
+            down: false,
             left: false,
             right: false,
-            jump: false,
-            jumpPressed: false, // edge trigger
+            space: false,
         };
 
-        // ── Button references ──
-        const btnLeft = document.getElementById('btnLeft');
-        const btnRight = document.getElementById('btnRight');
-        const btnJump = document.getElementById('btnJump');
-
-        // ──────────────────────────────────────────────────────────────
-        //  TOUCH / MOUSE BUTTON HANDLING (with pointer events)
-        // ──────────────────────────────────────────────────────────────
-
-        function setupButton(btn, onStart, onEnd) {
-            // Pointer events (works for touch and mouse)
-            btn.addEventListener('pointerdown', (e) => {
-                e.preventDefault();
-                onStart();
-                btn.setPointerCapture(e.pointerId);
-            });
-            btn.addEventListener('pointerup', (e) => {
-                e.preventDefault();
-                onEnd();
-                btn.releasePointerCapture(e.pointerId);
-            });
-            btn.addEventListener('pointercancel', (e) => {
-                onEnd();
-                btn.releasePointerCapture(e.pointerId);
-            });
-            // Also for older touch events fallback
-            btn.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                onStart();
-            }, { passive: false });
-            btn.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                onEnd();
-            }, { passive: false });
-            btn.addEventListener('touchcancel', (e) => {
-                onEnd();
-            }, { passive: false });
+        // ---------- UTILITY ----------
+        function dist(x1, y1, x2, y2) {
+            return Math.hypot(x2 - x1, y2 - y1);
         }
 
-        setupButton(btnLeft,
-            () => { input.left = true; },
-            () => { input.left = false; }
-        );
-        setupButton(btnRight,
-            () => { input.right = true; },
-            () => { input.right = false; }
-        );
-        setupButton(btnJump,
-            () => {
-                input.jump = true;
-                input.jumpPressed = true; // edge trigger
-            },
-            () => {
-                input.jump = false;
+        function lerp(a, b, t) {
+            return a + (b - a) * t;
+        }
+
+        function clamp(v, min, max) {
+            return Math.max(min, Math.min(max, v));
+        }
+
+        // ---------- PARTICLES ----------
+        function spawnDashParticles(x, y, angle, count = 18) {
+            for (let i = 0; i < count; i++) {
+                const speed = 2 + Math.random() * 5;
+                const a = angle + (Math.random() - 0.5) * 1.2;
+                const size = 2 + Math.random() * 5;
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 10,
+                    y: y + (Math.random() - 0.5) * 10,
+                    vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
+                    vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
+                    life: 1,
+                    decay: 0.008 + Math.random() * 0.015,
+                    size: size,
+                    maxSize: size,
+                    color: `hsl(${190 + Math.random() * 30}, 100%, ${60 + Math.random() * 30}%)`,
+                });
             }
-        );
+        }
 
-        // ──────────────────────────────────────────────────────────────
-        //  PHYSICS UPDATE
-        // ──────────────────────────────────────────────────────────────
+        function spawnTrailParticles(x, y, angle, count = 6) {
+            for (let i = 0; i < count; i++) {
+                const speed = 1 + Math.random() * 2.5;
+                const a = angle + (Math.random() - 0.5) * 0.8;
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 6,
+                    y: y + (Math.random() - 0.5) * 6,
+                    vx: Math.cos(a) * speed * 0.5,
+                    vy: Math.sin(a) * speed * 0.5,
+                    life: 1,
+                    decay: 0.025 + Math.random() * 0.035,
+                    size: 1.5 + Math.random() * 3,
+                    maxSize: 4,
+                    color: `hsl(${200 + Math.random() * 40}, 90%, ${70 + Math.random() * 25}%)`,
+                });
+            }
+        }
 
-        let lastTime = 0;
+        // ---------- DASH ----------
+        function performDash() {
+            if (player.isDashing) return;
+            if (player.cooldownTimer > 0) return;
 
-        function updatePhysics(dt) {
-            const dtClamped = Math.min(dt, 0.035);
-            const p = player;
+            player.isDashing = true;
+            player.dashTimer = player.dashDuration;
+            player.dashMultiplier = player.dashSpeedBoost;
 
-            // Coyote timer
-            if (p.onGround) {
-                p.coyoteTimer = COYOTE_TIME;
+            // Spawn burst particles
+            spawnDashParticles(player.x, player.y, player.facing, 30);
+
+            // Add some trail particles
+            for (let i = 0; i < 8; i++) {
+                spawnTrailParticles(
+                    player.x + (Math.random() - 0.5) * 20,
+                    player.y + (Math.random() - 0.5) * 20,
+                    player.facing + (Math.random() - 0.5) * 0.6,
+                    4
+                );
+            }
+
+            // Flash
+            player.flashTimer = 100;
+
+            // Screen shake (handled in render)
+            // We'll track shake offset
+            window.shakeAmount = 6;
+            window.shakeTimer = 120;
+        }
+
+        // ---------- UPDATE ----------
+        function update(dt) {
+            const dtFactor = dt / 16.67; // normalize to ~60fps
+
+            // ---- Input ----
+            let moveX = 0,
+                moveY = 0;
+            if (keys.w || keys.up) moveY = -1;
+            if (keys.s || keys.down) moveY = 1;
+            if (keys.a || keys.left) moveX = -1;
+            if (keys.d || keys.right) moveX = 1;
+
+            // Normalize
+            const len = Math.hypot(moveX, moveY);
+            if (len > 0) {
+                moveX /= len;
+                moveY /= len;
+            }
+
+            // ---- Facing ----
+            if (moveX !== 0 || moveY !== 0) {
+                player.facing = Math.atan2(moveY, moveX);
+            }
+
+            // ---- Movement ----
+            const targetVx = moveX * player.speed;
+            const targetVy = moveY * player.speed;
+
+            // Apply acceleration
+            if (moveX !== 0 || moveY !== 0) {
+                player.vx += (targetVx - player.vx) * 0.18 * dtFactor;
+                player.vy += (targetVy - player.vy) * 0.18 * dtFactor;
             } else {
-                p.coyoteTimer -= dtClamped;
+                player.vx *= Math.pow(player.friction, dtFactor * 0.6);
+                player.vy *= Math.pow(player.friction, dtFactor * 0.6);
+                if (Math.abs(player.vx) < 0.02) player.vx = 0;
+                if (Math.abs(player.vy) < 0.02) player.vy = 0;
             }
 
-            // Jump buffer
-            if (input.jumpPressed) {
-                p.bufferTimer = JUMP_BUFFER_TIME;
-                input.jumpPressed = false;
-            }
-            if (p.bufferTimer > 0) {
-                p.bufferTimer -= dtClamped;
-            }
+            // ---- Dash ----
+            if (player.isDashing) {
+                player.dashTimer -= dt;
+                if (player.dashTimer <= 0) {
+                    player.isDashing = false;
+                    player.dashMultiplier = 1;
+                    player.dashTimer = 0;
+                    player.cooldownTimer = player.dashCooldown;
 
-            // Horizontal movement
-            const accel = p.onGround ? MOVE_ACCEL : MOVE_ACCEL * AIR_CONTROL;
-            const friction = p.onGround ? GROUND_FRICTION : AIR_FRICTION;
+                    // Burst on end
+                    spawnDashParticles(player.x, player.y, player.facing + Math.PI, 12);
+                } else {
+                    // During dash: maintain high speed in facing direction
+                    const dashSpeed = player.speed * player.dashMultiplier;
+                    // Override velocity to dash in facing direction
+                    // But also allow slight steering
+                    const steer = 0.06;
+                    const targetDashX = Math.cos(player.facing) * dashSpeed;
+                    const targetDashY = Math.sin(player.facing) * dashSpeed;
+                    player.vx += (targetDashX - player.vx) * steer * dtFactor;
+                    player.vy += (targetDashY - player.vy) * steer * dtFactor;
 
-            if (input.left) {
-                p.vx -= accel * dtClamped;
-            }
-            if (input.right) {
-                p.vx += accel * dtClamped;
-            }
-
-            // Friction
-            if (!input.left && !input.right) {
-                p.vx *= Math.pow(friction, dtClamped * 60);
-            } else {
-                // Turn assist
-                if ((input.left && p.vx > 0) || (input.right && p.vx < 0)) {
-                    p.vx *= Math.pow(0.92, dtClamped * 60);
+                    // Spawn trail particles during dash
+                    if (Math.random() < 0.5 * dtFactor) {
+                        spawnTrailParticles(
+                            player.x + (Math.random() - 0.5) * 12,
+                            player.y + (Math.random() - 0.5) * 12,
+                            player.facing + (Math.random() - 0.5) * 0.4,
+                            2 + Math.floor(Math.random() * 3)
+                        );
+                    }
                 }
             }
 
-            // Clamp horizontal speed
-            if (Math.abs(p.vx) > MAX_SPEED) {
-                p.vx = Math.sign(p.vx) * MAX_SPEED;
-            }
-            if (Math.abs(p.vx) < 0.5) p.vx = 0;
-
-            // Gravity
-            p.vy += GRAVITY * dtClamped;
-            if (p.vy > MAX_FALL_SPEED) p.vy = MAX_FALL_SPEED;
-
-            // Jump
-            const canJump = p.coyoteTimer > 0 && p.bufferTimer > 0;
-            if (canJump) {
-                p.vy = -JUMP_SPEED;
-                p.onGround = false;
-                p.coyoteTimer = 0;
-                p.bufferTimer = 0;
+            // ---- Cooldown ----
+            if (player.cooldownTimer > 0) {
+                player.cooldownTimer -= dt;
+                if (player.cooldownTimer < 0) player.cooldownTimer = 0;
             }
 
-            // Variable jump height (cut jump)
-            if (!input.jump && p.vy < 0) {
-                p.vy *= 0.70;
+            // ---- Apply velocity ----
+            const speedMultiplier = player.isDashing ? 1 : 1;
+            player.x += player.vx * speedMultiplier * dtFactor;
+            player.y += player.vy * speedMultiplier * dtFactor;
+
+            // ---- Boundaries ----
+            const margin = player.radius + 4;
+            player.x = clamp(player.x, margin, W - margin);
+            player.y = clamp(player.y, margin, H - margin);
+
+            // ---- Trail ----
+            if (player.isDashing || Math.abs(player.vx) > 0.5 || Math.abs(player.vy) > 0.5) {
+                player.trail.push({ x: player.x, y: player.y, life: 1 });
+                if (player.trail.length > player.maxTrail) {
+                    player.trail.shift();
+                }
             }
-
-            // Move X
-            p.x += p.vx * dtClamped;
-
-            // Move Y
-            p.y += p.vy * dtClamped;
-
-            // ── Collisions ──
-
-            // Ground
-            if (p.y + p.h > GROUND_Y) {
-                p.y = GROUND_Y - p.h;
-                p.vy = 0;
-                p.onGround = true;
-                p.coyoteTimer = COYOTE_TIME;
-            }
-
-            // Ceiling (top wall)
-            if (p.y < CEILING_Y) {
-                p.y = CEILING_Y;
-                p.vy = 0;
-            }
-
-            // Left/Right walls
-            if (p.x < 0) { p.x = 0; p.vx = 0; }
-            if (p.x + p.w > W) { p.x = W - p.w; p.vx = 0; }
-
-            // ── Platform collision ──
-            const plat = PLATFORM;
-            const px = p.x, py = p.y, pw = p.w, ph = p.h;
-            const overlapX = px + pw > plat.x && px < plat.x + plat.w;
-            const overlapY = py + ph > plat.y && py < plat.y + plat.h;
-            if (overlapX && overlapY) {
-                // Resolve collision
-                const overlapTop = (py + ph) - plat.y;
-                const overlapBottom = (plat.y + plat.h) - py;
-                const overlapLeft = (px + pw) - plat.x;
-                const overlapRight = (plat.x + plat.w) - px;
-                const minOverlap = Math.min(overlapTop, overlapBottom, overlapLeft, overlapRight);
-
-                if (minOverlap === overlapTop && p.vy >= 0) {
-                    // Landing on top
-                    p.y = plat.y - p.h;
-                    p.vy = 0;
-                    p.onGround = true;
-                    p.coyoteTimer = COYOTE_TIME;
-                } else if (minOverlap === overlapBottom && p.vy < 0) {
-                    // Hitting bottom (head)
-                    p.y = plat.y + plat.h;
-                    p.vy = 0;
-                } else if (minOverlap === overlapLeft && p.vx > 0) {
-                    p.x = plat.x - p.w;
-                    p.vx = 0;
-                } else if (minOverlap === overlapRight && p.vx < 0) {
-                    p.x = plat.x + plat.w;
-                    p.vx = 0;
+            // Fade trail
+            for (let i = player.trail.length - 1; i >= 0; i--) {
+                player.trail[i].life -= 0.025 * dtFactor;
+                if (player.trail[i].life <= 0) {
+                    player.trail.splice(i, 1);
                 }
             }
 
-            // Fall death / respawn
-            if (p.y > H + 50) {
-                p.x = 240;
-                p.y = GROUND_Y - p.h;
-                p.vx = 0;
-                p.vy = 0;
-                p.onGround = true;
-                p.coyoteTimer = COYOTE_TIME;
+            // ---- Flash timer ----
+            if (player.flashTimer > 0) player.flashTimer -= dt;
+
+            // ---- Particles ----
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * dtFactor;
+                p.y += p.vy * dtFactor;
+                p.vx *= 0.98;
+                p.vy *= 0.98;
+                p.life -= p.decay * dtFactor;
+                p.size = p.maxSize * p.life;
+                if (p.life <= 0 || p.size < 0.1) {
+                    particles.splice(i, 1);
+                }
             }
 
-            // ── HUD ──
-            posDisplay.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}`;
-            velDisplay.textContent = `${Math.round(p.vx)}, ${Math.round(p.vy)}`;
+            // ---- Shake ----
+            if (window.shakeTimer > 0) {
+                window.shakeTimer -= dt;
+                if (window.shakeTimer < 0) window.shakeTimer = 0;
+                window.shakeAmount *= 0.96;
+                if (window.shakeAmount < 0.1) window.shakeAmount = 0;
+            }
+
+            // ---- UI ----
+            const speed = Math.hypot(player.vx, player.vy);
+            speedDisplay.textContent = Math.round(speed * 10) / 10;
+
+            // Dash dot
+            if (player.cooldownTimer > 0 || player.isDashing) {
+                dashDot.className = 'dot cooldown';
+            } else {
+                dashDot.className = 'dot ready';
+            }
         }
 
-        // ──────────────────────────────────────────────────────────────
-        //  RENDER – minimal, bland
-        // ──────────────────────────────────────────────────────────────
-
+        // ---------- RENDER ----------
         function render() {
-            const p = player;
+            ctx.save();
 
-            // ── Clear ──
-            ctx.clearRect(0, 0, W, H);
+            // ---- Screen shake ----
+            let shakeX = 0,
+                shakeY = 0;
+            if (window.shakeTimer > 0 && window.shakeAmount > 0.1) {
+                shakeX = (Math.random() - 0.5) * window.shakeAmount * 1.8;
+                shakeY = (Math.random() - 0.5) * window.shakeAmount * 1.8;
+                ctx.translate(shakeX, shakeY);
+            }
 
-            // ── Background (bland dark grey) ──
-            ctx.fillStyle = '#2a2a2a';
+            // ---- Background ----
+            const grad = ctx.createRadialGradient(W / 2, H / 2, 100, W / 2, H / 2, 550);
+            grad.addColorStop(0, '#132033');
+            grad.addColorStop(0.5, '#0d1825');
+            grad.addColorStop(1, '#070d14');
+            ctx.fillStyle = grad;
             ctx.fillRect(0, 0, W, H);
 
-            // ── Ground ──
-            ctx.fillStyle = '#3a3a3a';
-            ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-            ctx.fillStyle = '#444';
-            ctx.fillRect(0, GROUND_Y, W, 2); // thin line
+            // ---- Grid ----
+            ctx.strokeStyle = 'rgba(30, 60, 90, 0.2)';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            for (let x = 0; x <= W; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, H);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= H; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(W, y);
+                ctx.stroke();
+            }
 
-            // ── Ceiling (invisible but show a subtle line) ──
-            ctx.fillStyle = '#444';
-            ctx.fillRect(0, CEILING_Y, W, 1);
-
-            // ── Platform ──
-            const plat = PLATFORM;
-            ctx.fillStyle = '#4a4a4a';
-            ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-            ctx.fillStyle = '#555';
-            ctx.fillRect(plat.x, plat.y, plat.w, 2); // top edge
-
-            // ── Player (simple rectangle) ──
-            ctx.fillStyle = '#8ab8ff';
-            ctx.fillRect(p.x, p.y, p.w, p.h);
-
-            // Border (to make it visible)
-            ctx.strokeStyle = '#5a7a9a';
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(p.x, p.y, p.w, p.h);
-
-            // Small "eye" dot to show facing (just a tiny dot)
-            const eyeX = p.x + (p.vx >= 0 ? p.w - 8 : 8);
-            ctx.fillStyle = '#111';
+            // ---- Glow ring (subtle) ----
+            const grd = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 120);
+            grd.addColorStop(0, 'rgba(0, 180, 255, 0.04)');
+            grd.addColorStop(0.5, 'rgba(0, 180, 255, 0.02)');
+            grd.addColorStop(1, 'rgba(0, 180, 255, 0)');
+            ctx.fillStyle = grd;
             ctx.beginPath();
-            ctx.arc(eyeX, p.y + 10, 2, 0, Math.PI * 2);
+            ctx.arc(player.x, player.y, 120, 0, Math.PI * 2);
             ctx.fill();
+
+            // ---- Trail ----
+            for (const t of player.trail) {
+                const alpha = t.life * 0.35;
+                const size = player.radius * 0.5 * t.life;
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = `hsl(200, 90%, ${60 + 30 * t.life}%)`;
+                ctx.shadowColor = `rgba(0, 180, 255, ${alpha * 0.3})`;
+                ctx.shadowBlur = 15;
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+
+            // ---- Particles ----
+            for (const p of particles) {
+                ctx.globalAlpha = p.life * 0.9;
+                ctx.fillStyle = p.color || '#66d0ff';
+                ctx.shadowColor = `rgba(100, 200, 255, ${p.life * 0.3})`;
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(p.size, 0.5), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+
+            // ---- Player ----
+            const px = player.x;
+            const py = player.y;
+            const r = player.radius;
+            const angle = player.facing;
+
+            // Glow
+            const glowGrd = ctx.createRadialGradient(px, py, 5, px, py, r * 2.2);
+            const glowColor = player.isDashing ? 'rgba(0, 220, 255, 0.25)' : 'rgba(0, 160, 255, 0.10)';
+            glowGrd.addColorStop(0, glowColor);
+            glowGrd.addColorStop(1, 'rgba(0, 160, 255, 0)');
+            ctx.fillStyle = glowGrd;
+            ctx.beginPath();
+            ctx.arc(px, py, r * 2.2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Shadow on ground
+            ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+            ctx.shadowBlur = 0;
+
+            // ---- Draw the character (facing down = triangle pointing down) ----
+            // The triangle points in the direction of 'angle'
+            // angle = PI/2 is down
+
+            const tipDist = r * 1.25;
+            const baseDist = r * 0.7;
+            const baseHalf = r * 0.75;
+
+            const tipX = px + Math.cos(angle) * tipDist;
+            const tipY = py + Math.sin(angle) * tipDist;
+            const baseX = px - Math.cos(angle) * baseDist;
+            const baseY = py - Math.sin(angle) * baseDist;
+            const perpAngle = angle + Math.PI / 2;
+            const b1x = baseX + Math.cos(perpAngle) * baseHalf;
+            const b1y = baseY + Math.sin(perpAngle) * baseHalf;
+            const b2x = baseX - Math.cos(perpAngle) * baseHalf;
+            const b2y = baseY - Math.sin(perpAngle) * baseHalf;
+
+            // Outer glow
+            ctx.shadowColor = player.isDashing ? 'rgba(0, 220, 255, 0.6)' : 'rgba(0, 180, 255, 0.3)';
+            ctx.shadowBlur = player.isDashing ? 40 : 20;
+
+            // Body triangle
+            const gradTri = ctx.createLinearGradient(tipX, tipY, b1x, b1y);
+            if (player.isDashing) {
+                gradTri.addColorStop(0, '#00e5ff');
+                gradTri.addColorStop(0.5, '#0091ea');
+                gradTri.addColorStop(1, '#0055b3');
+            } else {
+                gradTri.addColorStop(0, '#4dd0e1');
+                gradTri.addColorStop(0.5, '#00bcd4');
+                gradTri.addColorStop(1, '#00695c');
+            }
+            ctx.fillStyle = gradTri;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(b1x, b1y);
+            ctx.lineTo(b2x, b2y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Border
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = player.isDashing ? 'rgba(0, 230, 255, 0.8)' : 'rgba(0, 200, 230, 0.4)';
+            ctx.lineWidth = player.isDashing ? 2.5 : 1.5;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(b1x, b1y);
+            ctx.lineTo(b2x, b2y);
+            ctx.closePath();
+            ctx.stroke();
+
+            // Inner detail: small circle near tip
+            ctx.shadowBlur = 0;
+            const innerX = px + Math.cos(angle) * r * 0.35;
+            const innerY = py + Math.sin(angle) * r * 0.35;
+            ctx.fillStyle = player.isDashing ? 'rgba(200, 240, 255, 0.9)' : 'rgba(180, 230, 255, 0.6)';
+            ctx.beginPath();
+            ctx.arc(innerX, innerY, r * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+
+            // "Eye" / core glow
+            const coreGrd = ctx.createRadialGradient(innerX, innerY, 2, innerX, innerY, r * 0.4);
+            coreGrd.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+            coreGrd.addColorStop(0.3, 'rgba(180, 240, 255, 0.5)');
+            coreGrd.addColorStop(1, 'rgba(100, 200, 255, 0)');
+            ctx.fillStyle = coreGrd;
+            ctx.beginPath();
+            ctx.arc(innerX, innerY, r * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ---- Dash indicator ring ----
+            if (player.isDashing) {
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = 'rgba(0, 230, 255, 0.25)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 6]);
+                const ringR = r * 1.6 + Math.sin(Date.now() / 80) * 3;
+                ctx.beginPath();
+                ctx.arc(px, py, ringR, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Speed lines around
+                for (let i = 0; i < 12; i++) {
+                    const a = i / 12 * Math.PI * 2 + Date.now() / 300;
+                    const dist = r * 1.8 + Math.sin(a * 2 + Date.now() / 200) * 4;
+                    const lx = px + Math.cos(a) * dist;
+                    const ly = py + Math.sin(a) * dist;
+                    const size = 2 + Math.sin(a * 3 + Date.now() / 150) * 1.5;
+                    ctx.fillStyle = `rgba(0, 220, 255, ${0.15 + Math.sin(a + Date.now() / 200) * 0.1 + 0.1})`;
+                    ctx.beginPath();
+                    ctx.arc(lx, ly, size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // ---- Cooldown ring ----
+            if (player.cooldownTimer > 0) {
+                const progress = player.cooldownTimer / player.dashCooldown;
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = 'rgba(255, 80, 80, 0.25)';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.arc(px, py, r * 1.4, -Math.PI / 2, -Math.PI / 2 + (1 - progress) * Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.shadowBlur = 0;
+            ctx.restore();
+
+            // ---- HUD: Dash cooldown bar (bottom) ----
+            const barW = 160,
+                barH = 6;
+            const barX = W / 2 - barW / 2,
+                barY = H - 28;
+            ctx.fillStyle = 'rgba(10, 20, 35, 0.6)';
+            ctx.roundRect ? ctx.roundRect(barX - 2, barY - 2, barW + 4, barH + 4, 6) : 0;
+            ctx.fillStyle = 'rgba(10, 20, 35, 0.5)';
+            ctx.beginPath();
+            ctx.roundRect ? ctx.roundRect(barX, barY, barW, barH, 4) : ctx.rect(barX, barY, barW, barH);
+            ctx.fill();
+
+            let fillW = 0;
+            let fillColor = '#00e676';
+            if (player.isDashing) {
+                const prog = player.dashTimer / player.dashDuration;
+                fillW = barW * prog;
+                fillColor = '#00e5ff';
+            } else if (player.cooldownTimer > 0) {
+                const prog = 1 - player.cooldownTimer / player.dashCooldown;
+                fillW = barW * prog;
+                fillColor = '#ff5252';
+            } else {
+                fillW = barW;
+                fillColor = '#00e676';
+            }
+
+            const fillGrad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+            if (player.isDashing) {
+                fillGrad.addColorStop(0, '#00b8d4');
+                fillGrad.addColorStop(1, '#00e5ff');
+            } else if (player.cooldownTimer > 0) {
+                fillGrad.addColorStop(0, '#ff1744');
+                fillGrad.addColorStop(1, '#ff5252');
+            } else {
+                fillGrad.addColorStop(0, '#00c853');
+                fillGrad.addColorStop(1, '#69f0ae');
+            }
+            ctx.fillStyle = fillGrad;
+            ctx.beginPath();
+            if (fillW > 0) {
+                ctx.rect(barX, barY, fillW, barH);
+                ctx.fill();
+            }
+
+            // Label
+            ctx.fillStyle = 'rgba(120, 180, 210, 0.5)';
+            ctx.font = '9px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('DASH', W / 2, barY - 6);
+
+            // ---- Speed indicator (ring around player) ----
+            const speed = Math.hypot(player.vx, player.vy);
+            const maxSpeed = player.speed * player.dashMultiplier;
+            const speedRatio = Math.min(speed / (player.speed * 1.8), 1);
+            if (speedRatio > 0.05) {
+                ctx.save();
+                ctx.globalAlpha = 0.15 + speedRatio * 0.25;
+                ctx.strokeStyle = `hsl(${200 - speedRatio * 40}, 100%, ${60 + speedRatio * 30}%)`;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 5]);
+                const ringR = player.radius + 8 + speedRatio * 8;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, ringR, 0, Math.PI * 2 * speedRatio);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+
+            // ---- FPS / debug ----
+            // (optional, not needed)
         }
 
-        // ──────────────────────────────────────────────────────────────
-        //  GAME LOOP
-        // ──────────────────────────────────────────────────────────────
+        // ---------- GAME LOOP ----------
+        let lastTime = 0;
 
-        function gameLoop(timestamp) {
-            const dt = lastTime ? Math.min((timestamp - lastTime) / 1000, 0.05) : 1 / 60;
-            lastTime = timestamp;
+        function gameLoop(time) {
+            const dt = Math.min(time - lastTime, 30);
+            lastTime = time;
 
-            updatePhysics(dt);
+            update(dt);
             render();
 
             requestAnimationFrame(gameLoop);
         }
 
-        // ──────────────────────────────────────────────────────────────
-        //  START
-        // ──────────────────────────────────────────────────────────────
+        // ---------- INPUT HANDLING ----------
+        function handleKeyDown(e) {
+            const key = e.key.toLowerCase();
+            const map = {
+                'w': 'w',
+                'a': 'a',
+                's': 's',
+                'd': 'd',
+                'arrowup': 'up',
+                'arrowdown': 'down',
+                'arrowleft': 'left',
+                'arrowright': 'right',
+                ' ': 'space',
+            };
+            const mapped = map[key] || map[e.key];
+            if (mapped) {
+                e.preventDefault();
+                keys[mapped] = true;
+            }
+            if (key === ' ' || e.key === ' ' || e.key === 'Shift') {
+                e.preventDefault();
+                performDash();
+            }
+        }
+
+        function handleKeyUp(e) {
+            const key = e.key.toLowerCase();
+            const map = {
+                'w': 'w',
+                'a': 'a',
+                's': 's',
+                'd': 'd',
+                'arrowup': 'up',
+                'arrowdown': 'down',
+                'arrowleft': 'left',
+                'arrowright': 'right',
+                ' ': 'space',
+            };
+            const mapped = map[key] || map[e.key];
+            if (mapped) {
+                e.preventDefault();
+                keys[mapped] = false;
+            }
+            if (key === ' ' || e.key === ' ' || e.key === 'Shift') {
+                e.preventDefault();
+            }
+        }
+
+        // Prevent page scroll with arrow keys / space
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        // Also prevent space from scrolling
+        window.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Space' || e.key === 'Shift') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // Touch / mobile support - simple joystick emulation via tap
+        let touchX = null,
+            touchY = null;
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            touchX = (touch.clientX - rect.left) * scaleX;
+            touchY = (touch.clientY - rect.top) * scaleY;
+
+            // Double tap for dash
+            if (e.touches.length === 2) {
+                performDash();
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            touchX = (touch.clientX - rect.left) * scaleX;
+            touchY = (touch.clientY - rect.top) * scaleY;
+
+            // Update keys based on touch position relative to player
+            const dx = touchX - player.x;
+            const dy = touchY - player.y;
+            const dist2 = Math.hypot(dx, dy);
+            if (dist2 > 15) {
+                const nx = dx / dist2;
+                const ny = dy / dist2;
+                keys.d = nx > 0.3;
+                keys.a = nx < -0.3;
+                keys.s = ny > 0.3;
+                keys.w = ny < -0.3;
+                keys.up = false;
+                keys.down = false;
+                keys.left = false;
+                keys.right = false;
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            touchX = null;
+            touchY = null;
+            keys.w = keys.a = keys.s = keys.d = false;
+            keys.up = keys.down = keys.left = keys.right = false;
+        }, { passive: false });
+
+        // Mouse click to dash
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button === 0) {
+                performDash();
+            }
+        });
+
+        // ---------- START ----------
+        // RoundRect polyfill for older browsers
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+                if (r > w / 2) r = w / 2;
+                if (r > h / 2) r = h / 2;
+                this.moveTo(x + r, y);
+                this.lineTo(x + w - r, y);
+                this.quadraticCurveTo(x + w, y, x + w, y + r);
+                this.lineTo(x + w, y + h - r);
+                this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                this.lineTo(x + r, y + h);
+                this.quadraticCurveTo(x, y + h, x, y + h - r);
+                this.lineTo(x, y + r);
+                this.quadraticCurveTo(x, y, x + r, y);
+                return this;
+            };
+        }
 
         requestAnimationFrame(gameLoop);
+
+        // ---- Resize handler for canvas scaling ----
+        function handleResize() {
+            // Canvas CSS handles it via width:100%, height:auto
+        }
+        window.addEventListener('resize', handleResize);
+
+        console.log('🎮 2D Movement Game');
+        console.log('🟢 Move: WASD / Arrow Keys');
+        console.log('⚡ Dash: SPACE / Shift / Click / Double-tap');
+        console.log('⬇️ Character faces the direction of movement (default: down)');
     </script>
 </body>
 </html>
