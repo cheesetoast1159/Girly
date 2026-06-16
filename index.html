@@ -2,310 +2,346 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Physics Platformer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Bland Mobile Platformer</title>
     <style>
-        /* ── Reset & Base ── */
+        /* ── Reset & Fullscreen ── */
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            background: #0b0e17;
+            background: #111;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            user-select: none;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            font-family: system-ui, sans-serif;
+            touch-action: none;
         }
 
-        /* ── Game Container ── */
         #gameContainer {
-            background: #141824;
-            padding: 20px 20px 18px;
-            border-radius: 24px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.04);
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 500 / 700; /* tall mobile view */
+            background: #1a1a1a;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 0 30px rgba(0,0,0,0.7);
         }
 
         /* ── Canvas ── */
         #gameCanvas {
             display: block;
-            width: 900px;
-            height: 500px;
-            border-radius: 14px;
-            background: #1a1f2e;
-            box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.5);
-            cursor: default;
-            image-rendering: pixelated;
+            width: 100%;
+            height: 100%;
+            background: #222;
+            touch-action: none;
         }
 
-        /* ── HUD Bar ── */
-        #hud {
+        /* ── Button overlay ── */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-top: 14px;
-            padding: 0 6px;
-            color: #8e9bb5;
-            font-size: 13px;
-            font-weight: 500;
-            letter-spacing: 0.3px;
+            padding: 0 16px;
+            pointer-events: none; /* let clicks pass to canvas? No, we want buttons to work */
+            pointer-events: none; /* we'll set pointer-events on children */
         }
 
-        #hud .controls {
+        .btn-group {
             display: flex;
-            gap: 18px;
+            gap: 14px;
+            pointer-events: auto;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 60px;
+            color: #eee;
+            font-size: 26px;
+            font-weight: bold;
+            width: 70px;
+            height: 70px;
+            display: flex;
+            justify-content: center;
             align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            touch-action: none;
+            transition: background 0.05s;
+            cursor: pointer;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            letter-spacing: 0.5px;
         }
 
-        #hud .controls kbd {
-            background: #222a3a;
-            padding: 4px 10px;
-            border-radius: 6px;
-            color: #c8d2e6;
-            font-size: 12px;
-            font-weight: 600;
-            border: 1px solid #303b4f;
-            box-shadow: 0 2px 0 #0b0e17;
+        .btn:active {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0.94);
         }
 
-        #hud .stats {
-            display: flex;
-            gap: 22px;
-            font-variant-numeric: tabular-nums;
+        .btn-jump {
+            width: 90px;
+            height: 90px;
+            background: rgba(70, 130, 255, 0.25);
+            border-color: rgba(70, 130, 255, 0.3);
+            font-size: 30px;
         }
 
-        #hud .stats span {
-            color: #5e6f8a;
+        .btn-jump:active {
+            background: rgba(70, 130, 255, 0.5);
         }
 
-        #hud .stats .value {
-            color: #bcc8e0;
-            font-weight: 600;
-            min-width: 48px;
-            display: inline-block;
-        }
-
-        /* ── Responsive ── */
-        @media (max-width: 940px) {
-            #gameCanvas {
-                width: 100%;
-                height: auto;
-                aspect-ratio: 900 / 500;
+        /* ── Responsive sizing ── */
+        @media (max-width: 500px) {
+            .btn {
+                width: 60px;
+                height: 60px;
+                font-size: 22px;
             }
-            #gameContainer {
-                padding: 14px;
-                border-radius: 18px;
-                margin: 10px;
+            .btn-jump {
+                width: 75px;
+                height: 75px;
+                font-size: 26px;
             }
-            #hud {
-                flex-wrap: wrap;
-                gap: 8px;
-                font-size: 12px;
+            #controls {
+                bottom: 14px;
+                padding: 0 10px;
             }
-            #hud .controls {
-                flex-wrap: wrap;
+            .btn-group {
                 gap: 10px;
             }
-            #hud .stats {
-                gap: 14px;
-                flex-wrap: wrap;
+        }
+
+        @media (max-width: 380px) {
+            .btn {
+                width: 50px;
+                height: 50px;
+                font-size: 18px;
+            }
+            .btn-jump {
+                width: 65px;
+                height: 65px;
+                font-size: 22px;
             }
         }
 
-        @media (max-width: 500px) {
-            #hud .controls kbd {
-                padding: 2px 8px;
-                font-size: 10px;
-            }
-            #hud .stats .value {
-                min-width: 32px;
-            }
+        /* ── HUD (minimal) ── */
+        #hud {
+            position: absolute;
+            top: 12px;
+            left: 16px;
+            color: #888;
+            font-size: 12px;
+            font-weight: 400;
+            pointer-events: none;
+            font-family: monospace;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+        }
+        #hud span {
+            display: inline-block;
+            margin-right: 12px;
+        }
+        .hud-value {
+            color: #bbb;
         }
     </style>
 </head>
 <body>
-
     <div id="gameContainer">
-        <canvas id="gameCanvas" width="900" height="500"></canvas>
+        <canvas id="gameCanvas" width="500" height="700"></canvas>
 
+        <!-- HUD -->
         <div id="hud">
-            <div class="controls">
-                <kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd>
-                <span style="color:#5e6f8a;margin:0 2px;">·</span>
-                <kbd>Space</kbd> / <kbd>↑</kbd> / <kbd>W</kbd> to jump
+            <span>pos <span class="hud-value" id="posDisplay">0,0</span></span>
+            <span>vel <span class="hud-value" id="velDisplay">0,0</span></span>
+        </div>
+
+        <!-- Controls -->
+        <div id="controls">
+            <div class="btn-group">
+                <div class="btn" id="btnLeft">◀</div>
+                <div class="btn" id="btnRight">▶</div>
             </div>
-            <div class="stats">
-                <span>pos <span class="value" id="posDisplay">0, 0</span></span>
-                <span>vel <span class="value" id="velDisplay">0, 0</span></span>
-                <span>state <span class="value" id="stateDisplay">ground</span></span>
+            <div class="btn-group">
+                <div class="btn btn-jump" id="btnJump">▲</div>
             </div>
         </div>
     </div>
 
     <script>
         // ═══════════════════════════════════════════════════════════════════
-        //  PHYSICS PLATFORMER  –  full 2D engine with realistic physics
+        //  BLAND MOBILE PLATFORMER  –  minimal, rectangle character,
+        //  empty room with high ceiling, one small floating platform.
         // ═══════════════════════════════════════════════════════════════════
 
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
-        // ── HUD elements ──
+        // HUD elements
         const posDisplay = document.getElementById('posDisplay');
         const velDisplay = document.getElementById('velDisplay');
-        const stateDisplay = document.getElementById('stateDisplay');
 
-        // ── Constants ──
-        const GRAVITY = 620; // px/s²  (≈ 0.63× Earth gravity, feels snappy)
-        const JUMP_SPEED = 400; // px/s   upward velocity at jump
-        const MOVE_ACCEL = 900; // px/s²  ground acceleration
-        const MAX_SPEED = 300; // px/s   max horizontal speed
-        const GROUND_FRICTION = 0.88; // deceleration multiplier per second (ground)
-        const AIR_FRICTION = 0.97; // deceleration multiplier per second (air)
-        const AIR_CONTROL = 0.55; // acceleration multiplier in air
-        const COYOTE_TIME = 0.08; // seconds after leaving ground you can still jump
-        const JUMP_BUFFER_TIME = 0.10; // seconds before landing you can buffer a jump
-        const MAX_FALL_SPEED = 550; // px/s   terminal velocity
-        const PLAYER_W = 28;
-        const PLAYER_H = 36;
+        // ── Canvas dimensions ──
+        const W = 500;
+        const H = 700;
+        canvas.width = W;
+        canvas.height = H;
+
+        // ── Physics constants (tuned for mobile feel) ──
+        const GRAVITY = 580;       // px/s²
+        const JUMP_SPEED = 380;    // px/s
+        const MOVE_ACCEL = 800;    // px/s²
+        const MAX_SPEED = 280;     // px/s
+        const GROUND_FRICTION = 0.88;
+        const AIR_FRICTION = 0.97;
+        const AIR_CONTROL = 0.50;
+        const COYOTE_TIME = 0.07;  // seconds
+        const JUMP_BUFFER_TIME = 0.08;
+        const MAX_FALL_SPEED = 500;
+        const PLAYER_W = 24;
+        const PLAYER_H = 34;
 
         // ── World ──
-        const GROUND_Y = 440; // y-coordinate of the ground surface
-        const WORLD_W = 900;
-        const WORLD_H = 500;
+        const GROUND_Y = 620;      // ground surface
+        const CEILING_Y = 40;      // invisible ceiling (player can't go above)
+        const PLATFORM = { x: 200, y: 380, w: 100, h: 12 }; // one small platform
 
-        // ── Platforms ──
-        const platforms = [
-            { x: 120, y: 350, w: 130, h: 14 },
-            { x: 360, y: 280, w: 110, h: 14 },
-            { x: 560, y: 210, w: 120, h: 14 },
-            { x: 740, y: 290, w: 110, h: 14 },
-            { x: 40, y: 200, w: 100, h: 14 },
-        ];
-
-        // ── Player state ──
+        // ── Player ──
         const player = {
-            x: 120,
+            x: 240,
             y: GROUND_Y - PLAYER_H,
             w: PLAYER_W,
             h: PLAYER_H,
             vx: 0,
             vy: 0,
             onGround: false,
-            jumpCount: 0,
             coyoteTimer: 0,
             bufferTimer: 0,
-            facing: 1, // 1 = right, -1 = left
-            // Animation / visual
-            walkCycle: 0,
-            eyeBlink: 0,
         };
 
-        // ── Input ──
-        const keys = {
+        // ── Input state (touch) ──
+        const input = {
             left: false,
             right: false,
             jump: false,
-            jumpPressed: false, // edge-triggered
+            jumpPressed: false, // edge trigger
         };
 
-        // ── Particles (simple dust / trail) ──
-        let particles = [];
-
-        // ── Timestamp ──
-        let lastTime = 0;
+        // ── Button references ──
+        const btnLeft = document.getElementById('btnLeft');
+        const btnRight = document.getElementById('btnRight');
+        const btnJump = document.getElementById('btnJump');
 
         // ──────────────────────────────────────────────────────────────
-        //  INPUT HANDLING
+        //  TOUCH / MOUSE BUTTON HANDLING (with pointer events)
         // ──────────────────────────────────────────────────────────────
 
-        document.addEventListener('keydown', (e) => {
-            const key = e.key;
-            // Prevent page scroll / default actions
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D']
-                .includes(key) || key === ' ') {
+        function setupButton(btn, onStart, onEnd) {
+            // Pointer events (works for touch and mouse)
+            btn.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
-            }
-
-            if (key === 'ArrowLeft' || key === 'a' || key === 'A') keys.left = true;
-            if (key === 'ArrowRight' || key === 'd' || key === 'D') keys.right = true;
-            if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === ' ' || key === 'Space') {
-                if (!keys.jump) keys.jumpPressed = true;
-                keys.jump = true;
-            }
-        });
-
-        document.addEventListener('keyup', (e) => {
-            const key = e.key;
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Space', 'w', 'W', 'a', 'A', 's', 'S', 'd', 'D']
-                .includes(key) || key === ' ') {
+                onStart();
+                btn.setPointerCapture(e.pointerId);
+            });
+            btn.addEventListener('pointerup', (e) => {
                 e.preventDefault();
-            }
+                onEnd();
+                btn.releasePointerCapture(e.pointerId);
+            });
+            btn.addEventListener('pointercancel', (e) => {
+                onEnd();
+                btn.releasePointerCapture(e.pointerId);
+            });
+            // Also for older touch events fallback
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                onStart();
+            }, { passive: false });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                onEnd();
+            }, { passive: false });
+            btn.addEventListener('touchcancel', (e) => {
+                onEnd();
+            }, { passive: false });
+        }
 
-            if (key === 'ArrowLeft' || key === 'a' || key === 'A') keys.left = false;
-            if (key === 'ArrowRight' || key === 'd' || key === 'D') keys.right = false;
-            if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === ' ' || key === 'Space') {
-                keys.jump = false;
+        setupButton(btnLeft,
+            () => { input.left = true; },
+            () => { input.left = false; }
+        );
+        setupButton(btnRight,
+            () => { input.right = true; },
+            () => { input.right = false; }
+        );
+        setupButton(btnJump,
+            () => {
+                input.jump = true;
+                input.jumpPressed = true; // edge trigger
+            },
+            () => {
+                input.jump = false;
             }
-        });
-
-        // Also handle window blur to release keys
-        window.addEventListener('blur', () => {
-            keys.left = false;
-            keys.right = false;
-            keys.jump = false;
-            keys.jumpPressed = false;
-        });
+        );
 
         // ──────────────────────────────────────────────────────────────
         //  PHYSICS UPDATE
         // ──────────────────────────────────────────────────────────────
 
+        let lastTime = 0;
+
         function updatePhysics(dt) {
-            // Clamp dt to avoid physics explosions
             const dtClamped = Math.min(dt, 0.035);
             const p = player;
 
-            // ── Coyote timer ──
+            // Coyote timer
             if (p.onGround) {
                 p.coyoteTimer = COYOTE_TIME;
             } else {
                 p.coyoteTimer -= dtClamped;
             }
 
-            // ── Jump buffer ──
-            if (keys.jumpPressed) {
+            // Jump buffer
+            if (input.jumpPressed) {
                 p.bufferTimer = JUMP_BUFFER_TIME;
-                keys.jumpPressed = false;
+                input.jumpPressed = false;
             }
             if (p.bufferTimer > 0) {
                 p.bufferTimer -= dtClamped;
             }
 
-            // ── Horizontal movement ──
+            // Horizontal movement
             const accel = p.onGround ? MOVE_ACCEL : MOVE_ACCEL * AIR_CONTROL;
             const friction = p.onGround ? GROUND_FRICTION : AIR_FRICTION;
 
-            if (keys.left) {
+            if (input.left) {
                 p.vx -= accel * dtClamped;
-                p.facing = -1;
             }
-            if (keys.right) {
+            if (input.right) {
                 p.vx += accel * dtClamped;
-                p.facing = 1;
             }
 
-            // Apply friction (only when not actively moving in the direction of velocity)
-            if (!keys.left && !keys.right) {
+            // Friction
+            if (!input.left && !input.right) {
                 p.vx *= Math.pow(friction, dtClamped * 60);
             } else {
-                // If moving opposite to input, extra friction to help turn
-                if ((keys.left && p.vx > 0) || (keys.right && p.vx < 0)) {
+                // Turn assist
+                if ((input.left && p.vx > 0) || (input.right && p.vx < 0)) {
                     p.vx *= Math.pow(0.92, dtClamped * 60);
                 }
             }
@@ -314,59 +350,63 @@
             if (Math.abs(p.vx) > MAX_SPEED) {
                 p.vx = Math.sign(p.vx) * MAX_SPEED;
             }
-            // Dead zone – stop micro-movement
             if (Math.abs(p.vx) < 0.5) p.vx = 0;
 
-            // ── Gravity ──
+            // Gravity
             p.vy += GRAVITY * dtClamped;
             if (p.vy > MAX_FALL_SPEED) p.vy = MAX_FALL_SPEED;
 
-            // ── Jump ──
+            // Jump
             const canJump = p.coyoteTimer > 0 && p.bufferTimer > 0;
             if (canJump) {
                 p.vy = -JUMP_SPEED;
                 p.onGround = false;
                 p.coyoteTimer = 0;
                 p.bufferTimer = 0;
-                p.jumpCount += 1;
-                // Spawn dust particles on jump
-                spawnDust(p.x + p.w / 2, p.y + p.h, 6, '#aac9ff');
             }
 
-            // ── Variable jump height ──
-            // If jump key is released while going up, cut the upward velocity
-            if (!keys.jump && p.vy < 0) {
+            // Variable jump height (cut jump)
+            if (!input.jump && p.vy < 0) {
                 p.vy *= 0.70;
-                // If we cut it, also reduce the jump count effect
             }
 
-            // ── Move X ──
+            // Move X
             p.x += p.vx * dtClamped;
 
-            // ── Move Y ──
+            // Move Y
             p.y += p.vy * dtClamped;
 
-            // ── Collision: platforms + ground ──
+            // ── Collisions ──
 
-            // First, assume not on ground
-            p.onGround = false;
+            // Ground
+            if (p.y + p.h > GROUND_Y) {
+                p.y = GROUND_Y - p.h;
+                p.vy = 0;
+                p.onGround = true;
+                p.coyoteTimer = COYOTE_TIME;
+            }
+
+            // Ceiling (top wall)
+            if (p.y < CEILING_Y) {
+                p.y = CEILING_Y;
+                p.vy = 0;
+            }
+
+            // Left/Right walls
+            if (p.x < 0) { p.x = 0; p.vx = 0; }
+            if (p.x + p.w > W) { p.x = W - p.w; p.vx = 0; }
 
             // ── Platform collision ──
-            for (const plat of platforms) {
-                const px = p.x,
-                    py = p.y,
-                    pw = p.w,
-                    ph = p.h;
-                const overlapX = px + pw > plat.x && px < plat.x + plat.w;
-                const overlapY = py + ph > plat.y && py < plat.y + plat.h;
-                if (!overlapX || !overlapY) continue;
-
-                // Determine which side the player is approaching from
+            const plat = PLATFORM;
+            const px = p.x, py = p.y, pw = p.w, ph = p.h;
+            const overlapX = px + pw > plat.x && px < plat.x + plat.w;
+            const overlapY = py + ph > plat.y && py < plat.y + plat.h;
+            if (overlapX && overlapY) {
+                // Resolve collision
                 const overlapTop = (py + ph) - plat.y;
                 const overlapBottom = (plat.y + plat.h) - py;
                 const overlapLeft = (px + pw) - plat.x;
                 const overlapRight = (plat.x + plat.w) - px;
-
                 const minOverlap = Math.min(overlapTop, overlapBottom, overlapLeft, overlapRight);
 
                 if (minOverlap === overlapTop && p.vy >= 0) {
@@ -380,362 +420,75 @@
                     p.y = plat.y + plat.h;
                     p.vy = 0;
                 } else if (minOverlap === overlapLeft && p.vx > 0) {
-                    // Hitting left side
                     p.x = plat.x - p.w;
                     p.vx = 0;
                 } else if (minOverlap === overlapRight && p.vx < 0) {
-                    // Hitting right side
                     p.x = plat.x + plat.w;
                     p.vx = 0;
                 }
             }
 
-            // ── Ground collision ──
-            if (p.y + p.h > GROUND_Y) {
-                p.y = GROUND_Y - p.h;
-                p.vy = 0;
-                p.onGround = true;
-                p.coyoteTimer = COYOTE_TIME;
-            }
-
-            // ── World bounds (left/right walls) ──
-            if (p.x < 0) { p.x = 0;
-                p.vx = 0; }
-            if (p.x + p.w > WORLD_W) { p.x = WORLD_W - p.w;
-                p.vx = 0; }
-
-            // ── Fall death ──
-            if (p.y > WORLD_H + 100) {
-                // Respawn
-                p.x = 120;
+            // Fall death / respawn
+            if (p.y > H + 50) {
+                p.x = 240;
                 p.y = GROUND_Y - p.h;
                 p.vx = 0;
                 p.vy = 0;
                 p.onGround = true;
                 p.coyoteTimer = COYOTE_TIME;
-                particles = [];
             }
 
-            // ── Walk cycle ──
-            if (Math.abs(p.vx) > 10 && p.onGround) {
-                p.walkCycle += dtClamped * Math.abs(p.vx) * 0.04;
-                // Spawn dust while running
-                if (Math.random() < 0.3) {
-                    spawnDust(
-                        p.x + (p.facing === 1 ? 0 : p.w),
-                        p.y + p.h - 2,
-                        1,
-                        'rgba(200,215,240,0.25)'
-                    );
-                }
-            } else if (p.onGround) {
-                p.walkCycle *= 0.92;
-            }
-
-            // ── Eye blink ──
-            p.eyeBlink += dtClamped;
-            if (p.eyeBlink > 3.5 + Math.random() * 2) p.eyeBlink = 0;
-
-            // ── Update particles ──
-            for (let i = particles.length - 1; i >= 0; i--) {
-                const pt = particles[i];
-                pt.x += pt.vx * dtClamped;
-                pt.y += pt.vy * dtClamped;
-                pt.vy += 60 * dtClamped;
-                pt.life -= dtClamped;
-                pt.size *= 0.995;
-                if (pt.life <= 0 || pt.size < 0.3) {
-                    particles.splice(i, 1);
-                }
-            }
-
-            // ── HUD update ──
+            // ── HUD ──
             posDisplay.textContent = `${Math.round(p.x)}, ${Math.round(p.y)}`;
             velDisplay.textContent = `${Math.round(p.vx)}, ${Math.round(p.vy)}`;
-            stateDisplay.textContent = p.onGround ? 'ground' : (p.vy < 0 ? 'rising' : 'falling');
-            stateDisplay.style.color = p.onGround ? '#7ae0a0' : (p.vy < 0 ? '#ffd57a' : '#ff8a8a');
         }
 
         // ──────────────────────────────────────────────────────────────
-        //  PARTICLES
-        // ──────────────────────────────────────────────────────────────
-
-        function spawnDust(x, y, count, color) {
-            for (let i = 0; i < count; i++) {
-                particles.push({
-                    x: x + (Math.random() - 0.5) * 12,
-                    y: y + (Math.random() - 0.5) * 6,
-                    vx: (Math.random() - 0.5) * 80,
-                    vy: -Math.random() * 60 - 20,
-                    size: 2 + Math.random() * 4,
-                    life: 0.4 + Math.random() * 0.5,
-                    maxLife: 0.9,
-                    color: color || 'rgba(180,200,230,0.3)',
-                });
-            }
-        }
-
-        // ──────────────────────────────────────────────────────────────
-        //  RENDER
+        //  RENDER – minimal, bland
         // ──────────────────────────────────────────────────────────────
 
         function render() {
             const p = player;
 
             // ── Clear ──
-            ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+            ctx.clearRect(0, 0, W, H);
 
-            // ── Sky gradient ──
-            const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-            skyGrad.addColorStop(0, '#0f1729');
-            skyGrad.addColorStop(0.5, '#1a2540');
-            skyGrad.addColorStop(1, '#28345a');
-            ctx.fillStyle = skyGrad;
-            ctx.fillRect(0, 0, WORLD_W, GROUND_Y);
-
-            // ── Stars ──
-            ctx.fillStyle = 'rgba(255,255,255,0.5)';
-            const seed = 42;
-            for (let i = 0; i < 60; i++) {
-                const sx = ((i * 137 + seed) % WORLD_W);
-                const sy = ((i * 251 + seed * 3) % (GROUND_Y - 20));
-                const ss = ((i * 31) % 3) * 0.4 + 0.4;
-                ctx.globalAlpha = 0.3 + ((i * 17) % 5) * 0.1;
-                ctx.beginPath();
-                ctx.arc(sx, sy, ss, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            ctx.globalAlpha = 1;
+            // ── Background (bland dark grey) ──
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, W, H);
 
             // ── Ground ──
-            // Main ground
-            ctx.fillStyle = '#2c3d5a';
-            ctx.fillRect(0, GROUND_Y, WORLD_W, WORLD_H - GROUND_Y);
+            ctx.fillStyle = '#3a3a3a';
+            ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, GROUND_Y, W, 2); // thin line
 
-            // Grass strip
-            ctx.fillStyle = '#3f5a3a';
-            ctx.fillRect(0, GROUND_Y - 3, WORLD_W, 6);
+            // ── Ceiling (invisible but show a subtle line) ──
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, CEILING_Y, W, 1);
 
-            // Grass blades
-            ctx.strokeStyle = '#4d6e47';
+            // ── Platform ──
+            const plat = PLATFORM;
+            ctx.fillStyle = '#4a4a4a';
+            ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+            ctx.fillStyle = '#555';
+            ctx.fillRect(plat.x, plat.y, plat.w, 2); // top edge
+
+            // ── Player (simple rectangle) ──
+            ctx.fillStyle = '#8ab8ff';
+            ctx.fillRect(p.x, p.y, p.w, p.h);
+
+            // Border (to make it visible)
+            ctx.strokeStyle = '#5a7a9a';
             ctx.lineWidth = 1.5;
-            for (let i = 0; i < WORLD_W; i += 6) {
-                const h = 4 + ((i * 37) % 7);
-                ctx.beginPath();
-                ctx.moveTo(i, GROUND_Y - 1);
-                ctx.lineTo(i + (i % 3 === 0 ? -1 : 1), GROUND_Y - 1 - h);
-                ctx.stroke();
-            }
+            ctx.strokeRect(p.x, p.y, p.w, p.h);
 
-            // Ground highlight line
-            ctx.fillStyle = 'rgba(255,255,255,0.04)';
-            ctx.fillRect(0, GROUND_Y - 1, WORLD_W, 1);
-
-            // ── Platforms ──
-            for (const plat of platforms) {
-                // Shadow
-                ctx.fillStyle = 'rgba(0,0,0,0.25)';
-                ctx.fillRect(plat.x + 3, plat.y + 4, plat.w, plat.h);
-
-                // Main body
-                const grad = ctx.createLinearGradient(plat.x, plat.y, plat.x, plat.y + plat.h);
-                grad.addColorStop(0, '#4a6a8a');
-                grad.addColorStop(0.4, '#3a5a78');
-                grad.addColorStop(1, '#2a4a68');
-                ctx.fillStyle = grad;
-                ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
-
-                // Top highlight
-                ctx.fillStyle = 'rgba(255,255,255,0.15)';
-                ctx.fillRect(plat.x + 4, plat.y + 1, plat.w - 8, 3);
-
-                // Top edge glow
-                ctx.fillStyle = 'rgba(120,200,255,0.08)';
-                ctx.fillRect(plat.x, plat.y, plat.w, 1);
-
-                // Edge accents
-                ctx.fillStyle = 'rgba(255,255,255,0.05)';
-                ctx.fillRect(plat.x, plat.y + 2, 3, plat.h - 4);
-                ctx.fillRect(plat.x + plat.w - 3, plat.y + 2, 3, plat.h - 4);
-            }
-
-            // ── Particles ──
-            for (const pt of particles) {
-                const alpha = pt.life / pt.maxLife;
-                ctx.globalAlpha = alpha * 0.7;
-                ctx.fillStyle = pt.color || 'rgba(180,200,230,0.3)';
-                ctx.beginPath();
-                ctx.arc(pt.x, pt.y, pt.size * 0.8, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            ctx.globalAlpha = 1;
-
-            // ── Player ──
-            drawPlayer(p);
-
-            // ── Vignette ──
-            const vignette = ctx.createRadialGradient(
-                WORLD_W / 2, WORLD_H / 2, WORLD_H * 0.3,
-                WORLD_W / 2, WORLD_H / 2, WORLD_H * 0.95
-            );
-            vignette.addColorStop(0, 'rgba(0,0,0,0)');
-            vignette.addColorStop(1, 'rgba(0,0,0,0.25)');
-            ctx.fillStyle = vignette;
-            ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-        }
-
-        // ──────────────────────────────────────────────────────────────
-        //  DRAW PLAYER
-        // ──────────────────────────────────────────────────────────────
-
-        function drawPlayer(p) {
-            const x = p.x,
-                y = p.y,
-                w = p.w,
-                h = p.h;
-            const f = p.facing;
-
-            ctx.save();
-
-            // ── Shadow ──
-            ctx.fillStyle = 'rgba(0,0,0,0.25)';
+            // Small "eye" dot to show facing (just a tiny dot)
+            const eyeX = p.x + (p.vx >= 0 ? p.w - 8 : 8);
+            ctx.fillStyle = '#111';
             ctx.beginPath();
-            ctx.ellipse(x + w / 2, y + h + 2, w * 0.6, 4, 0, 0, Math.PI * 2);
+            ctx.arc(eyeX, p.y + 10, 2, 0, Math.PI * 2);
             ctx.fill();
-
-            // ── Body ──
-            const bodyGrad = ctx.createLinearGradient(x, y, x + w, y + h);
-            bodyGrad.addColorStop(0, '#6ac9ff');
-            bodyGrad.addColorStop(0.4, '#4ab0f0');
-            bodyGrad.addColorStop(1, '#2a8fd0');
-            ctx.fillStyle = bodyGrad;
-            ctx.shadowColor = 'rgba(60,180,255,0.2)';
-            ctx.shadowBlur = 12;
-
-            // Rounded body
-            const r = 4;
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.quadraticCurveTo(x, y, x, y + r);
-            ctx.lineTo(x, y + h - r);
-            ctx.quadraticCurveTo(x, y + h, x + r, y + h);
-            ctx.lineTo(x + w - r, y + h);
-            ctx.quadraticCurveTo(x + w, y + h, x + w, y + h - r);
-            ctx.lineTo(x + w, y + r);
-            ctx.quadraticCurveTo(x + w, y, x + w - r, y);
-            ctx.closePath();
-            ctx.fill();
-
-            // Body highlight (top)
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = 'rgba(255,255,255,0.20)';
-            ctx.fillRect(x + 6, y + 3, w - 12, 5);
-
-            // ── Belt / detail ──
-            ctx.fillStyle = 'rgba(255,255,255,0.08)';
-            ctx.fillRect(x + 4, y + h * 0.55, w - 8, 2);
-            ctx.fillStyle = 'rgba(255,255,255,0.05)';
-            ctx.fillRect(x + 2, y + h * 0.7, w - 4, 1);
-
-            // ── Head ──
-            const headSize = w * 0.85;
-            const headX = x + (w - headSize) / 2;
-            const headY = y - headSize * 0.5;
-
-            // Head shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.08)';
-            ctx.beginPath();
-            ctx.ellipse(headX + headSize / 2, headY + headSize * 0.6, headSize * 0.5, headSize * 0.2, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Head circle
-            const headGrad = ctx.createRadialGradient(
-                headX + headSize * 0.3, headY + headSize * 0.2, 2,
-                headX + headSize * 0.5, headY + headSize * 0.5, headSize * 0.7
-            );
-            headGrad.addColorStop(0, '#ffddb0');
-            headGrad.addColorStop(0.7, '#f5c89a');
-            headGrad.addColorStop(1, '#e0b080');
-            ctx.fillStyle = headGrad;
-            ctx.shadowColor = 'rgba(0,0,0,0.1)';
-            ctx.shadowBlur = 6;
-            ctx.beginPath();
-            ctx.arc(headX + headSize / 2, headY + headSize / 2, headSize * 0.5, 0, Math.PI * 2);
-            ctx.fill();
-
-            // ── Eyes ──
-            ctx.shadowBlur = 0;
-            const eyeY = headY + headSize * 0.40;
-            const eyeSpacing = headSize * 0.20;
-
-            // White of eyes
-            ctx.fillStyle = 'white';
-            ctx.beginPath();
-            ctx.ellipse(headX + headSize / 2 - eyeSpacing + (f === 1 ? 1 : -1), eyeY, 4.5, 5, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(headX + headSize / 2 + eyeSpacing + (f === 1 ? 1 : -1), eyeY, 4.5, 5, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Pupils (look in facing direction)
-            const pupilOff = f * 2;
-            ctx.fillStyle = '#1a2a3a';
-            ctx.beginPath();
-            ctx.arc(headX + headSize / 2 - eyeSpacing + pupilOff + (f === 1 ? 1 : -1), eyeY + 0.5, 2.4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(headX + headSize / 2 + eyeSpacing + pupilOff + (f === 1 ? 1 : -1), eyeY + 0.5, 2.4, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Eye shine
-            ctx.fillStyle = 'rgba(255,255,255,0.7)';
-            ctx.beginPath();
-            ctx.arc(headX + headSize / 2 - eyeSpacing + pupilOff + 1.5 + (f === 1 ? 1 : -1), eyeY - 1.5, 1.2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(headX + headSize / 2 + eyeSpacing + pupilOff + 1.5 + (f === 1 ? 1 : -1), eyeY - 1.5, 1.2, 0, Math.PI * 2);
-            ctx.fill();
-
-            // ── Mouth ──
-            const mouthY = eyeY + headSize * 0.35;
-            ctx.strokeStyle = '#c07050';
-            ctx.lineWidth = 1.8;
-            ctx.beginPath();
-            if (p.vy < -50) {
-                // Happy / jumping
-                ctx.arc(headX + headSize / 2, mouthY - 1, 5, 0, Math.PI);
-            } else if (p.vy > 100) {
-                // Scared / falling
-                ctx.ellipse(headX + headSize / 2, mouthY + 2, 4, 3, 0, 0, Math.PI * 2);
-            } else {
-                // Neutral smile
-                ctx.arc(headX + headSize / 2, mouthY, 5, 0.1, Math.PI - 0.1);
-            }
-            ctx.stroke();
-
-            // ── Blush ──
-            ctx.fillStyle = 'rgba(255,150,150,0.18)';
-            ctx.beginPath();
-            ctx.ellipse(headX + headSize * 0.15, eyeY + headSize * 0.4, 4, 3, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(headX + headSize * 0.85, eyeY + headSize * 0.4, 4, 3, 0, 0, Math.PI * 2);
-            ctx.fill();
-
-            // ── Legs (simple) ──
-            ctx.shadowBlur = 0;
-            const legOffset = p.onGround ? Math.sin(p.walkCycle) * 2 : 0;
-            ctx.fillStyle = '#2a4a6a';
-            ctx.fillRect(x + 4, y + h - 4, 6, 4 + legOffset * 0.5);
-            ctx.fillRect(x + w - 10, y + h - 4, 6, 4 - legOffset * 0.5);
-
-            // ── Arms (simple) ──
-            ctx.fillStyle = '#f5c89a';
-            const armSwing = p.onGround ? Math.sin(p.walkCycle + 0.5) * 3 : -4;
-            ctx.fillRect(x - 3, y + 8 + armSwing * 0.3, 4, 10);
-            ctx.fillRect(x + w - 1, y + 8 - armSwing * 0.3, 4, 10);
-
-            ctx.restore();
         }
 
         // ──────────────────────────────────────────────────────────────
@@ -756,18 +509,7 @@
         //  START
         // ──────────────────────────────────────────────────────────────
 
-        // Initial spawn particles
-        for (let i = 0; i < 12; i++) {
-            spawnDust(
-                player.x + player.w / 2 + (Math.random() - 0.5) * 40,
-                player.y + player.h,
-                1,
-                'rgba(180,200,230,0.15)'
-            );
-        }
-
         requestAnimationFrame(gameLoop);
     </script>
-
 </body>
 </html>
