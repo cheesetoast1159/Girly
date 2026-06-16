@@ -31,6 +31,7 @@
             padding: 16px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 180, 255, 0.05);
             border: 1px solid rgba(0, 180, 255, 0.08);
+            position: relative;
         }
 
         canvas {
@@ -42,6 +43,73 @@
             aspect-ratio: 900 / 600;
             touch-action: none;
             cursor: none;
+        }
+
+        /* Menu Overlay */
+        #menuOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(13, 21, 32, 0.85);
+            border-radius: 20px;
+            z-index: 10;
+            backdrop-filter: blur(6px);
+            transition: opacity 0.4s;
+        }
+        #menuOverlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #menuOverlay h1 {
+            color: #8ac4e0;
+            font-size: 2.4rem;
+            font-weight: 300;
+            letter-spacing: 4px;
+            text-shadow: 0 0 30px rgba(0, 180, 255, 0.3);
+            margin-bottom: 40px;
+        }
+        .menu-buttons {
+            display: flex;
+            gap: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .menu-btn {
+            background: rgba(30, 50, 70, 0.7);
+            border: 2px solid rgba(80, 140, 180, 0.4);
+            color: #b0d4e8;
+            padding: 16px 40px;
+            border-radius: 50px;
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.25s;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            backdrop-filter: blur(4px);
+            min-width: 160px;
+        }
+        .menu-btn:hover {
+            background: rgba(50, 90, 130, 0.6);
+            border-color: #4dd0e1;
+            transform: scale(1.05);
+            box-shadow: 0 0 40px rgba(0, 180, 255, 0.2);
+        }
+        .menu-btn:active {
+            transform: scale(0.95);
+        }
+        .menu-btn .sub {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 300;
+            opacity: 0.6;
+            margin-top: 4px;
         }
 
         .hud {
@@ -113,13 +181,37 @@
                 gap: 6px;
                 justify-content: center;
             }
+            #menuOverlay h1 {
+                font-size: 1.8rem;
+            }
+            .menu-btn {
+                padding: 12px 28px;
+                font-size: 1.2rem;
+                min-width: 120px;
+            }
         }
     </style>
 </head>
 <body>
 
-    <div class="game-wrapper">
+    <div class="game-wrapper" id="gameWrapper">
         <canvas id="game" width="900" height="600"></canvas>
+
+        <!-- Menu Overlay -->
+        <div id="menuOverlay">
+            <h1>⚔️ DRONE HUNTER</h1>
+            <div class="menu-buttons">
+                <div class="menu-btn" data-weapon="shotgun">
+                    🔫 SHOTGUN
+                    <span class="sub">spread shot · damage falloff</span>
+                </div>
+                <div class="menu-btn" data-weapon="sniper">
+                    🎯 SNIPER
+                    <span class="sub">high caliber · massive recoil</span>
+                </div>
+            </div>
+        </div>
+
         <div class="hud">
             <div class="status">
                 <div class="indicator">
@@ -138,6 +230,8 @@
             <div class="info">
                 <span style="color:#4a7a8a;">🔫</span>
                 <span id="ammoStatus" style="color:#8ac4e0;">READY</span>
+                <span style="color:#4a7a8a; margin-left:10px;">WEAPON:</span>
+                <span id="weaponLabel" style="color:#8ac4e0; font-weight:600;">SHOTGUN</span>
             </div>
         </div>
     </div>
@@ -149,9 +243,15 @@
         const speedDisplay = document.getElementById('speedDisplay');
         const ammoStatus = document.getElementById('ammoStatus');
         const enemyCount = document.getElementById('enemyCount');
+        const weaponLabel = document.getElementById('weaponLabel');
+        const menuOverlay = document.getElementById('menuOverlay');
 
         const W = 900,
             H = 600;
+
+        // ---------- WEAPON SELECTION ----------
+        let weaponType = 'shotgun'; // 'shotgun' or 'sniper'
+        let gameStarted = false;
 
         // ---------- PLAYER ----------
         const player = {
@@ -178,12 +278,34 @@
             flashTimer: 0,
         };
 
-        // ---------- SHOTGUN ----------
-        const shotgun = {
+        // ---------- WEAPON CONFIGS ----------
+        const weaponConfigs = {
+            shotgun: {
+                cooldownDuration: 250,
+                pelletCount: 8,
+                spread: 0.3,
+                pelletSpeed: 8,
+                maxRange: 400,
+                damageBase: 2,
+                effects: { shake: 3, flashCount: 18 },
+            },
+            sniper: {
+                cooldownDuration: 600, // slower
+                pelletCount: 1,
+                spread: 0.02, // near perfect accuracy
+                pelletSpeed: 16, // fast
+                maxRange: 700,
+                damageBase: 8, // high damage
+                effects: { shake: 12, flashCount: 35 },
+            }
+        };
+
+        // ---------- SHOTGUN (will be updated based on weapon) ----------
+        let shotgun = {
             cooldown: 0,
             cooldownDuration: 250,
             pelletCount: 8,
-            spread: 0.3, // total spread angle in radians
+            spread: 0.3,
             pelletSpeed: 8,
             maxRange: 400,
             damageBase: 2,
@@ -289,26 +411,28 @@
             }
         }
 
-        function spawnMuzzleFlash(x, y, angle, count = 18) {
+        function spawnMuzzleFlash(x, y, angle, count = 18, big = false) {
+            const color = big ? 'hsl(40, 100%, 85%)' : 'hsl(40, 100%, 70%)';
+            const speedMult = big ? 1.5 : 1;
             for (let i = 0; i < count; i++) {
-                const speed = 1.5 + Math.random() * 5;
-                const a = angle + (Math.random() - 0.5) * 0.7;
-                const size = 2 + Math.random() * 5;
+                const speed = (1.5 + Math.random() * 6) * speedMult;
+                const a = angle + (Math.random() - 0.5) * (big ? 1.0 : 0.7);
+                const size = (2 + Math.random() * 5) * (big ? 1.5 : 1);
                 particles.push({
-                    x: x + Math.cos(angle) * 8 + (Math.random() - 0.5) * 8,
-                    y: y + Math.sin(angle) * 8 + (Math.random() - 0.5) * 8,
+                    x: x + Math.cos(angle) * 12 + (Math.random() - 0.5) * 10,
+                    y: y + Math.sin(angle) * 12 + (Math.random() - 0.5) * 10,
                     vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
                     vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
                     life: 1,
-                    decay: 0.03 + Math.random() * 0.05,
+                    decay: (0.03 + Math.random() * 0.05) * (big ? 0.7 : 1),
                     size: size,
                     maxSize: size,
-                    color: `hsl(40, 100%, ${70 + Math.random() * 25}%)`,
+                    color: color,
                 });
             }
         }
 
-        function spawnEnemyDeath(x, y) {
+        function spawnEnemyDeath(x, y, color = 'hsl(0, 80%, 50%)') {
             for (let i = 0; i < 20; i++) {
                 const speed = 1 + Math.random() * 4;
                 const a = Math.random() * Math.PI * 2;
@@ -321,7 +445,7 @@
                     decay: 0.01 + Math.random() * 0.02,
                     size: 2 + Math.random() * 4,
                     maxSize: 6,
-                    color: `hsl(0, 80%, ${50 + Math.random() * 30}%)`,
+                    color: color,
                 });
             }
         }
@@ -345,15 +469,22 @@
             window.shakeTimer = 150;
         }
 
-        // ---------- SHOOT ----------
+        // ---------- SHOOT (now uses weapon config) ----------
         function shoot(angle) {
             if (shotgun.cooldown > 0) return;
 
             shotgun.cooldown = shotgun.cooldownDuration;
             player.facing = angle;
 
-            spawnMuzzleFlash(player.x, player.y, angle, 20);
+            const config = weaponConfigs[weaponType];
+            const isSniper = weaponType === 'sniper';
+            const shakeAmt = config.effects.shake;
+            const flashCount = config.effects.flashCount;
 
+            // Muzzle flash (bigger for sniper)
+            spawnMuzzleFlash(player.x, player.y, angle, flashCount, isSniper);
+
+            // Spawn pellets
             for (let i = 0; i < shotgun.pelletCount; i++) {
                 const spreadAngle = angle + (Math.random() - 0.5) * shotgun.spread;
                 const speed = shotgun.pelletSpeed * (0.8 + Math.random() * 0.4);
@@ -370,17 +501,26 @@
                     originX: originX,
                     originY: originY,
                     damage: shotgun.damageBase,
+                    // for sniper, add a trail effect
+                    isSniper: isSniper,
                 });
             }
 
-            window.shakeAmount = 3;
-            window.shakeTimer = 80;
+            // Screen shake
+            window.shakeAmount = shakeAmt;
+            window.shakeTimer = isSniper ? 200 : 80;
 
-            ammoStatus.textContent = 'BANG!';
-            setTimeout(() => { ammoStatus.textContent = 'READY'; }, 200);
+            ammoStatus.textContent = isSniper ? 'BOOM!' : 'BANG!';
+            setTimeout(() => { ammoStatus.textContent = 'READY'; }, 300);
+
+            // For sniper, extra visual: big flash overlay (handled in render via flashAlpha)
+            if (isSniper) {
+                window.sniperFlash = 1.0;
+                window.sniperFlashTimer = 200;
+            }
         }
 
-        // ---------- ENEMY ----------
+        // ---------- ENEMY SPAWN ----------
         function spawnEnemy() {
             let x, y;
             const side = Math.floor(Math.random() * 4);
@@ -392,25 +532,42 @@
                 y = H - margin; } else { x = margin;
                 y = margin + Math.random() * (H - 2 * margin); }
 
+            // Decide type: 50% drone, 50% missile (if less than 2 missiles, prefer missile)
+            const missileCount = enemies.filter(e => e.type === 'missile').length;
+            let type = 'drone';
+            if (missileCount < 2 && Math.random() < 0.6) {
+                type = 'missile';
+            } else if (enemies.length < 3) {
+                // if few enemies, spawn drone
+                type = 'drone';
+            } else {
+                type = Math.random() < 0.5 ? 'drone' : 'missile';
+            }
+
+            const isMissile = type === 'missile';
             enemies.push({
                 x: x,
                 y: y,
                 radius: 16,
-                speed: 0.8,
+                speed: isMissile ? 2.8 : 0.8,
                 vx: 0,
                 vy: 0,
-                health: 5,
+                health: isMissile ? 3 : 5, // missile has less health
                 shootTimer: 0,
                 shootInterval: 3000,
                 angle: 0,
-                // AI: maintain distance
-                preferredDistance: 250,
-                distanceDeadZone: 30,
+                type: type,
+                preferredDistance: isMissile ? 50 : 250, // missile wants to get close
+                distanceDeadZone: 20,
+                // missile dodge
+                dodgeCooldown: 0,
             });
         }
 
         // ---------- UPDATE ----------
         function update(dt) {
+            if (!gameStarted) return;
+
             const dtFactor = dt / 16.67;
 
             // ---- Aiming (Left Joystick) ----
@@ -560,43 +717,87 @@
                 const d = Math.hypot(dx, dy);
                 if (d > 1) {
                     const angle = Math.atan2(dy, dx);
-                    // Desired distance
+                    let speedFactor = 0;
                     const pref = e.preferredDistance;
                     const dead = e.distanceDeadZone;
-                    let speedFactor = 0;
-                    if (d > pref + dead) {
-                        speedFactor = 0.6; // move toward
-                    } else if (d < pref - dead) {
-                        speedFactor = -0.6; // move away
+                    if (e.type === 'missile') {
+                        // Missile: always move toward player, but dodge bullets
+                        speedFactor = 1.0;
+                        // Dodge logic: check all bullets
+                        let dodgeX = 0,
+                            dodgeY = 0;
+                        for (const b of bullets) {
+                            const distToBullet = dist(e.x, e.y, b.x, b.y);
+                            if (distToBullet < 80 && b.life > 0.2) {
+                                // Bullet heading direction
+                                const bulletDir = Math.atan2(b.vy, b.vx);
+                                // Perpendicular direction
+                                const perpAngle = bulletDir + Math.PI / 2;
+                                // If bullet is heading towards us, dodge perpendicular
+                                const toBullet = Math.atan2(b.y - e.y, b.x - e.x);
+                                const angleDiff = Math.atan2(Math.sin(toBullet - bulletDir), Math.cos(toBullet - bulletDir));
+                                if (Math.abs(angleDiff) < 1.2) { // roughly heading towards
+                                    const strength = 1.5 * (1 - distToBullet / 80);
+                                    dodgeX += Math.cos(perpAngle) * strength;
+                                    dodgeY += Math.sin(perpAngle) * strength;
+                                }
+                            }
+                        }
+                        if (dodgeX !== 0 || dodgeY !== 0) {
+                            const dodgeAngle = Math.atan2(dodgeY, dodgeX);
+                            const dodgeStrength = Math.min(Math.hypot(dodgeX, dodgeY), 2.0);
+                            // Blend with movement toward player
+                            const moveAngle = angle;
+                            const blend = 0.6; // dodge priority
+                            const finalAngle = Math.atan2(
+                                Math.sin(moveAngle) * (1 - blend) + Math.sin(dodgeAngle) * blend,
+                                Math.cos(moveAngle) * (1 - blend) + Math.cos(dodgeAngle) * blend
+                            );
+                            const speed = e.speed * 1.2;
+                            e.vx += (Math.cos(finalAngle) * speed - e.vx) * 0.08 * dtFactor;
+                            e.vy += (Math.sin(finalAngle) * speed - e.vy) * 0.08 * dtFactor;
+                        } else {
+                            // normal movement toward player
+                            const speed = e.speed;
+                            e.vx += (Math.cos(angle) * speed - e.vx) * 0.08 * dtFactor;
+                            e.vy += (Math.sin(angle) * speed - e.vy) * 0.08 * dtFactor;
+                        }
                     } else {
-                        speedFactor = 0; // stay
+                        // Drone: maintain distance
+                        if (d > pref + dead) {
+                            speedFactor = 0.6;
+                        } else if (d < pref - dead) {
+                            speedFactor = -0.6;
+                        } else {
+                            speedFactor = 0;
+                        }
+                        if (d > pref + 100) speedFactor = 0.8;
+                        const moveSpeed = e.speed * speedFactor;
+                        e.vx += (Math.cos(angle) * moveSpeed - e.vx) * 0.04 * dtFactor;
+                        e.vy += (Math.sin(angle) * moveSpeed - e.vy) * 0.04 * dtFactor;
                     }
-                    // If too far, still move toward but slower
-                    if (d > pref + 100) speedFactor = 0.8;
-                    // Apply movement
-                    const moveSpeed = e.speed * speedFactor;
-                    e.vx += (Math.cos(angle) * moveSpeed - e.vx) * 0.04 * dtFactor;
-                    e.vy += (Math.sin(angle) * moveSpeed - e.vy) * 0.04 * dtFactor;
                 }
                 e.x += e.vx * dtFactor;
                 e.y += e.vy * dtFactor;
                 e.x = clamp(e.x, e.radius, W - e.radius);
                 e.y = clamp(e.y, e.radius, H - e.radius);
 
-                // Shoot timer
-                e.shootTimer += dt;
-                if (e.shootTimer >= e.shootInterval) {
-                    e.shootTimer = 0;
-                    const angle = Math.atan2(player.y - e.y, player.x - e.x);
-                    enemyProjectiles.push({
-                        x: e.x + Math.cos(angle) * (e.radius + 4),
-                        y: e.y + Math.sin(angle) * (e.radius + 4),
-                        vx: Math.cos(angle) * 3.0,
-                        vy: Math.sin(angle) * 3.0,
-                        radius: 6,
-                        life: 1,
-                        damage: 1,
-                    });
+                // Drone shoots only
+                if (e.type === 'drone') {
+                    e.shootTimer += dt;
+                    if (e.shootTimer >= e.shootInterval) {
+                        e.shootTimer = 0;
+                        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+                        enemyProjectiles.push({
+                            x: e.x + Math.cos(angle) * (e.radius + 4),
+                            y: e.y + Math.sin(angle) * (e.radius + 4),
+                            vx: Math.cos(angle) * 3.0,
+                            vy: Math.sin(angle) * 3.0,
+                            radius: 6,
+                            life: 1,
+                            damage: 1,
+                        });
+                    }
                 }
             }
 
@@ -658,7 +859,8 @@
                             });
                         }
                         if (e.health <= 0) {
-                            spawnEnemyDeath(e.x, e.y);
+                            const color = e.type === 'missile' ? 'hsl(30, 100%, 50%)' : 'hsl(0, 80%, 50%)';
+                            spawnEnemyDeath(e.x, e.y, color);
                             enemies.splice(j, 1);
                         }
                         break;
@@ -670,7 +872,7 @@
             }
 
             // ---- Spawn new enemies ----
-            const maxEnemies = 3;
+            const maxEnemies = 4;
             while (enemies.length < maxEnemies) {
                 spawnEnemy();
             }
@@ -693,6 +895,13 @@
                 if (window.shakeTimer < 0) window.shakeTimer = 0;
                 window.shakeAmount *= 0.96;
                 if (window.shakeAmount < 0.1) window.shakeAmount = 0;
+            }
+
+            // ---- Sniper flash ----
+            if (window.sniperFlashTimer !== undefined && window.sniperFlashTimer > 0) {
+                window.sniperFlashTimer -= dt;
+                window.sniperFlash = window.sniperFlashTimer / 200;
+                if (window.sniperFlashTimer <= 0) window.sniperFlash = 0;
             }
 
             // ---- UI ----
@@ -764,18 +973,22 @@
             for (const b of bullets) {
                 const alpha = b.life * 0.8;
                 ctx.globalAlpha = alpha;
-                ctx.fillStyle = `hsl(40, 100%, ${50 + 30 * b.life}%)`;
+                const isSniper = b.isSniper || false;
+                ctx.fillStyle = isSniper ? `hsl(40, 100%, 70%)` : `hsl(40, 100%, ${50 + 30 * b.life}%)`;
                 ctx.shadowColor = `rgba(255, 200, 100, ${alpha * 0.5})`;
-                ctx.shadowBlur = 15;
-                const size = 2 + 3 * b.life;
+                ctx.shadowBlur = isSniper ? 40 : 15;
+                const size = isSniper ? 6 + 4 * b.life : 2 + 3 * b.life;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, size, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.shadowBlur = 25;
-                ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.2})`;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, size * 2.5, 0, Math.PI * 2);
-                ctx.fill();
+                // Extra glow for sniper
+                if (isSniper) {
+                    ctx.shadowBlur = 60;
+                    ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, size * 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
@@ -796,36 +1009,36 @@
             }
             ctx.shadowBlur = 0;
 
-            // ---- Enemies (Mouse Pointer Shape) ----
+            // ---- Enemies ----
             for (const e of enemies) {
                 ctx.save();
                 ctx.translate(e.x, e.y);
                 const angle = Math.atan2(player.y - e.y, player.x - e.x);
                 ctx.rotate(angle);
                 const size = e.radius;
-
-                // Draw mouse pointer shape (black with neon red outline)
-                ctx.shadowColor = 'rgba(255, 0, 0, 0.8)';
-                ctx.shadowBlur = 15;
-                // Fill black
-                ctx.fillStyle = '#000000';
+                const isMissile = e.type === 'missile';
+                // Color: missile is orange/yellow, drone is red
+                const fillColor = isMissile ? '#000000' : '#000000';
+                const strokeColor = isMissile ? '#ff9100' : '#ff1744';
+                const glowColor = isMissile ? 'rgba(255, 145, 0, 0.8)' : 'rgba(255, 23, 68, 0.8)';
+                ctx.shadowColor = glowColor;
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = fillColor;
                 ctx.beginPath();
-                // Arrow shape: tip at (size,0), left wing (-size/2, size/3), right wing (-size/2, -size/3), back indent (0,0)
                 ctx.moveTo(size, 0);
                 ctx.lineTo(-size * 0.4, -size * 0.5);
                 ctx.lineTo(-size * 0.2, 0);
                 ctx.lineTo(-size * 0.4, size * 0.5);
                 ctx.closePath();
                 ctx.fill();
-                // Neon red outline
-                ctx.shadowBlur = 20;
-                ctx.strokeStyle = '#ff1744';
+                ctx.shadowBlur = 25;
+                ctx.strokeStyle = strokeColor;
                 ctx.lineWidth = 2.5;
                 ctx.stroke();
 
                 // Health bar
                 ctx.shadowBlur = 0;
-                const healthPercent = e.health / 5;
+                const healthPercent = e.health / (isMissile ? 3 : 5);
                 ctx.fillStyle = 'rgba(0,0,0,0.6)';
                 ctx.fillRect(-size, -size - 10, size * 2, 4);
                 ctx.fillStyle = healthPercent > 0.3 ? '#4caf50' : '#ff5252';
@@ -846,6 +1059,25 @@
             }
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
+
+            // ---- Sniper Flash (big white flash) ----
+            if (window.sniperFlash && window.sniperFlash > 0.01) {
+                const alpha = window.sniperFlash * 0.8;
+                const gradFlash = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 500);
+                gradFlash.addColorStop(0, `rgba(255, 255, 255, ${alpha})`);
+                gradFlash.addColorStop(0.3, `rgba(255, 255, 255, ${alpha * 0.5})`);
+                gradFlash.addColorStop(1, `rgba(255, 255, 255, 0)`);
+                ctx.fillStyle = gradFlash;
+                ctx.fillRect(0, 0, W, H);
+                // Extra core
+                const coreGrad = ctx.createRadialGradient(player.x, player.y, 5, player.x, player.y, 150);
+                coreGrad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.6})`);
+                coreGrad.addColorStop(1, `rgba(255, 255, 255, 0)`);
+                ctx.fillStyle = coreGrad;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, 150, 0, Math.PI * 2);
+                ctx.fill();
+            }
 
             // ---- Player ----
             const px = player.x;
@@ -950,11 +1182,11 @@
 
             ctx.shadowBlur = 0;
 
-            // ---- Shotgun Spread Fan (when aiming) ----
+            // ---- Shotgun Spread Fan ----
             if (aimJoystick.active && Math.hypot(aimJoystick.dx, aimJoystick.dy) > 5) {
                 const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
                 const spread = shotgun.spread;
-                const range = 120; // visual range
+                const range = 120;
                 ctx.save();
                 ctx.globalAlpha = 0.25;
                 ctx.fillStyle = 'rgba(255, 200, 100, 0.2)';
@@ -969,7 +1201,6 @@
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
                 ctx.restore();
-                // Also draw two lines indicating spread edges
                 ctx.save();
                 ctx.globalAlpha = 0.3;
                 ctx.strokeStyle = 'rgba(255, 200, 100, 0.4)';
@@ -1141,6 +1372,7 @@
 
         // Touch
         canvas.addEventListener('touchstart', (e) => {
+            if (!gameStarted) return;
             e.preventDefault();
             const touches = e.touches;
 
@@ -1184,6 +1416,7 @@
         }, { passive: false });
 
         canvas.addEventListener('touchmove', (e) => {
+            if (!gameStarted) return;
             e.preventDefault();
             const touches = e.touches;
 
@@ -1216,6 +1449,7 @@
         }, { passive: false });
 
         canvas.addEventListener('touchend', (e) => {
+            if (!gameStarted) return;
             e.preventDefault();
             const touches = e.touches;
 
@@ -1274,6 +1508,7 @@
         }, { passive: false });
 
         canvas.addEventListener('touchcancel', (e) => {
+            if (!gameStarted) return;
             e.preventDefault();
             if (aimJoystick.active && aimJoystick.shouldShootOnRelease) {
                 const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
@@ -1300,6 +1535,7 @@
         let mouseOnMove = false;
 
         canvas.addEventListener('mousedown', (e) => {
+            if (!gameStarted) return;
             const { x, y } = getCanvasCoords(e);
             mouseDown = true;
 
@@ -1332,6 +1568,7 @@
         });
 
         canvas.addEventListener('mousemove', (e) => {
+            if (!gameStarted) return;
             const { x, y } = getCanvasCoords(e);
             if (mouseDown && mouseOnAim && aimJoystick.active) {
                 aimJoystick.dx = x - aimJoystick.x;
@@ -1356,6 +1593,7 @@
         });
 
         canvas.addEventListener('mouseup', (e) => {
+            if (!gameStarted) return;
             mouseDown = false;
             if (mouseOnAim && aimJoystick.active) {
                 if (aimJoystick.shouldShootOnRelease) {
@@ -1379,6 +1617,7 @@
         });
 
         canvas.addEventListener('mouseleave', () => {
+            if (!gameStarted) return;
             if (mouseDown) {
                 if (mouseOnAim && aimJoystick.active) {
                     if (aimJoystick.shouldShootOnRelease) {
@@ -1405,6 +1644,7 @@
 
         // Keyboard fallback
         window.addEventListener('keydown', (e) => {
+            if (!gameStarted) return;
             const key = e.key.toLowerCase();
             if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(key) ||
                 e.key === ' ') {
@@ -1419,11 +1659,36 @@
         });
 
         window.addEventListener('keyup', (e) => {
+            if (!gameStarted) return;
             const key = e.key.toLowerCase();
             if (key === 'w' || e.key === 'ArrowUp') keys.up = false;
             if (key === 's' || e.key === 'ArrowDown') keys.down = false;
             if (key === 'a' || e.key === 'ArrowLeft') keys.left = false;
             if (key === 'd' || e.key === 'ArrowRight') keys.right = false;
+        });
+
+        // ---------- MENU HANDLING ----------
+        document.querySelectorAll('.menu-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const weapon = btn.dataset.weapon;
+                weaponType = weapon;
+                // Update shotgun config
+                const config = weaponConfigs[weapon];
+                shotgun.cooldownDuration = config.cooldownDuration;
+                shotgun.pelletCount = config.pelletCount;
+                shotgun.spread = config.spread;
+                shotgun.pelletSpeed = config.pelletSpeed;
+                shotgun.maxRange = config.maxRange;
+                shotgun.damageBase = config.damageBase;
+                shotgun.cooldown = 0;
+
+                weaponLabel.textContent = weapon.toUpperCase();
+                menuOverlay.classList.add('hidden');
+                gameStarted = true;
+
+                // Spawn initial enemies
+                for (let i = 0; i < 2; i++) spawnEnemy();
+            });
         });
 
         // ---------- GAME LOOP ----------
@@ -1455,17 +1720,10 @@
             };
         }
 
-        // Spawn initial enemies
-        for (let i = 0; i < 2; i++) spawnEnemy();
-
         requestAnimationFrame(gameLoop);
 
-        console.log('🔫 Drone Hunter');
-        console.log('🟢 Move: Right Joystick (or WASD)');
-        console.log('🎯 Aim & Shoot: Left Joystick (drag to aim, release to fire)');
-        console.log('⚡ Dash: Top-Left Button (or Space/Shift)');
-        console.log('💥 Damage decreases with distance!');
-        console.log('🤖 Enemies: mouse‑pointer drones with neon red outline, maintain distance.');
+        console.log('🔫 Drone Hunter - Weapon Selection');
+        console.log('Choose your weapon: Shotgun or Sniper');
     </script>
 </body>
 </html>
