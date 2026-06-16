@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Katana · Dash & Slash</title>
+    <title>Shotgun · Dash & Blast</title>
     <style>
         * {
             margin: 0;
@@ -132,8 +132,8 @@
                 </div>
             </div>
             <div class="info">
-                <span style="color:#4a7a8a;">⚔️</span>
-                <span id="swordStatus" style="color:#8ac4e0;">READY</span>
+                <span style="color:#4a7a8a;">🔫</span>
+                <span id="ammoStatus" style="color:#8ac4e0;">READY</span>
             </div>
         </div>
     </div>
@@ -143,7 +143,7 @@
         const ctx = canvas.getContext('2d');
         const dashDot = document.getElementById('dashDot');
         const speedDisplay = document.getElementById('speedDisplay');
-        const swordStatus = document.getElementById('swordStatus');
+        const ammoStatus = document.getElementById('ammoStatus');
 
         const W = 900,
             H = 600;
@@ -158,7 +158,7 @@
             vy: 0,
             friction: 0.88,
             accel: 0.45,
-            facing: 0, // always faces the finger / mouse
+            facing: 0,
 
             // Dash
             isDashing: false,
@@ -174,44 +174,55 @@
             flashTimer: 0,
         };
 
-        // ---------- SWORD (Katana) ----------
-        const sword = {
-            angle: 0,
-            targetAngle: 0,
-            swinging: false,
-            swingTimer: 0,
-            swingDuration: 400, // ms (slow draw + fast swing)
-            startAngle: 0,
-            currentAngle: 0,
-            cooldownTimer: 0,
-            cooldownDuration: 350,
-            length: 110, // increased radius
-            trail: [],
-            maxTrail: 25,
+        // ---------- SHOTGUN ----------
+        const shotgun = {
+            cooldown: 0,
+            cooldownDuration: 300, // ms
+            pelletCount: 8,
+            spread: 0.3, // radians total spread
+            pelletSpeed: 12,
+            maxRange: 400, // max distance for damage
+            damageBase: 20,
         };
 
-        // ---------- JOYSTICK (sword aim) ----------
-        const joystick = {
-            x: 110,
-            y: 100,
+        // ---------- BULLETS ----------
+        let bullets = [];
+
+        // ---------- JOYSTICK (movement) ----------
+        const moveJoystick = {
+            x: 120,
+            y: 480, // lower left
             radius: 64,
-            knobRadius: 24,
+            knobRadius: 26,
             active: false,
             touchId: null,
-            angle: 0,
             dx: 0,
             dy: 0,
-            baseX: 0,
-            baseY: 0,
+            angle: 0,
+            magnitude: 0,
+        };
+
+        // ---------- BUTTONS ----------
+        const shootButton = {
+            x: 770,
+            y: 480,
+            radius: 50,
+            active: false,
+            touchId: null,
+        };
+
+        const dashButton = {
+            x: 50,
+            y: 50,
+            radius: 40,
+            active: false,
+            touchId: null,
         };
 
         // ---------- PARTICLES ----------
         let particles = [];
 
-        // ---------- FLASH ----------
-        let flashAlpha = 0;
-
-        // ---------- INPUT ----------
+        // ---------- INPUT (keyboard fallback) ----------
         const keys = {
             w: false,
             a: false,
@@ -224,12 +235,10 @@
             space: false,
         };
 
-        let activePointer = null; // { x, y, id }
-
         // ---------- UTILITY ----------
         function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 
-        function lerp(a, b, t) { return a + (b - a) * t; }
+        function dist(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
 
         // ---------- PARTICLES ----------
         function spawnDashParticles(x, y, angle, count = 28) {
@@ -269,21 +278,21 @@
             }
         }
 
-        function spawnSwordSlash(x, y, angle, count = 32) {
+        function spawnMuzzleFlash(x, y, angle, count = 15) {
             for (let i = 0; i < count; i++) {
-                const speed = 4 + Math.random() * 10;
-                const a = angle + (Math.random() - 0.5) * 1.2;
-                const size = 2 + Math.random() * 7;
+                const speed = 2 + Math.random() * 6;
+                const a = angle + (Math.random() - 0.5) * 0.8;
+                const size = 2 + Math.random() * 5;
                 particles.push({
-                    x: x + Math.cos(angle) * 50 + (Math.random() - 0.5) * 40,
-                    y: y + Math.sin(angle) * 50 + (Math.random() - 0.5) * 40,
-                    vx: Math.cos(a) * speed * (0.7 + Math.random() * 0.5),
-                    vy: Math.sin(a) * speed * (0.7 + Math.random() * 0.5),
+                    x: x + Math.cos(angle) * 10 + (Math.random() - 0.5) * 8,
+                    y: y + Math.sin(angle) * 10 + (Math.random() - 0.5) * 8,
+                    vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
+                    vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
                     life: 1,
-                    decay: 0.015 + Math.random() * 0.025,
+                    decay: 0.03 + Math.random() * 0.05,
                     size: size,
                     maxSize: size,
-                    color: `hsl(${40 + Math.random() * 30}, 100%, ${70 + Math.random() * 25}%)`,
+                    color: `hsl(40, 100%, ${70 + Math.random() * 25}%)`,
                 });
             }
         }
@@ -307,57 +316,75 @@
             window.shakeTimer = 180;
         }
 
-        // ---------- SWORD SWING ----------
-        function performSwordSwing(angle) {
-            if (sword.swinging) return;
-            if (sword.cooldownTimer > 0) return;
+        // ---------- SHOOT ----------
+        function shoot() {
+            if (shotgun.cooldown > 0) return;
 
-            sword.swinging = true;
-            sword.swingTimer = sword.swingDuration;
-            sword.startAngle = angle;
-            sword.currentAngle = angle;
-            swordStatus.textContent = 'SWING!';
+            shotgun.cooldown = shotgun.cooldownDuration;
+            const angle = player.facing;
 
-            // Spawn slash particles
-            spawnSwordSlash(player.x, player.y, angle, 35);
-            window.shakeAmount = 8;
-            window.shakeTimer = 180;
+            // Muzzle flash
+            spawnMuzzleFlash(player.x, player.y, angle, 20);
 
-            // Trail
-            for (let i = 0; i < 14; i++) {
-                sword.trail.push({ x: player.x, y: player.y, angle: angle, life: 1 });
-                if (sword.trail.length > sword.maxTrail) sword.trail.shift();
+            // Fire pellets
+            for (let i = 0; i < shotgun.pelletCount; i++) {
+                const spreadAngle = angle + (Math.random() - 0.5) * shotgun.spread;
+                const speed = shotgun.pelletSpeed * (0.8 + Math.random() * 0.4);
+                const originX = player.x + Math.cos(angle) * 25;
+                const originY = player.y + Math.sin(angle) * 25;
+                bullets.push({
+                    x: originX,
+                    y: originY,
+                    vx: Math.cos(spreadAngle) * speed,
+                    vy: Math.sin(spreadAngle) * speed,
+                    life: 1,
+                    maxLife: 2000, // ms
+                    age: 0,
+                    originX: originX,
+                    originY: originY,
+                    damage: shotgun.damageBase,
+                });
             }
+
+            // Screen shake
+            window.shakeAmount = 3;
+            window.shakeTimer = 80;
+
+            ammoStatus.textContent = 'BANG!';
+            setTimeout(() => { ammoStatus.textContent = 'READY'; }, 200);
         }
 
         // ---------- UPDATE ----------
         function update(dt) {
             const dtFactor = dt / 16.67;
 
-            // ---- Movement Input ----
+            // ---- Movement via Joystick ----
             let moveX = 0,
                 moveY = 0;
-            if (keys.w || keys.up) moveY = -1;
-            if (keys.s || keys.down) moveY = 1;
-            if (keys.a || keys.left) moveX = -1;
-            if (keys.d || keys.right) moveX = 1;
-
-            const len = Math.hypot(moveX, moveY);
-            if (len > 0) { moveX /= len;
-                moveY /= len; }
-
-            // ---- Face the active pointer (finger / mouse) ----
-            if (activePointer) {
-                const dx = activePointer.x - player.x;
-                const dy = activePointer.y - player.y;
-                if (Math.hypot(dx, dy) > 5) {
-                    player.facing = Math.atan2(dy, dx);
+            if (moveJoystick.active) {
+                const mag = moveJoystick.magnitude;
+                if (mag > 0.1) {
+                    moveX = moveJoystick.dx / moveJoystick.radius * 0.6; // normalize to max 0.6? Actually we use direct ratio
+                    moveY = moveJoystick.dy / moveJoystick.radius * 0.6;
+                    // Clamp to max 1
+                    const len = Math.hypot(moveX, moveY);
+                    if (len > 1) { moveX /= len;
+                        moveY /= len; }
                 }
             } else {
-                // If no pointer, face movement direction
-                if (Math.abs(moveX) > 0.1 || Math.abs(moveY) > 0.1) {
-                    player.facing = Math.atan2(moveY, moveX);
-                }
+                // Keyboard fallback
+                if (keys.w || keys.up) moveY = -1;
+                if (keys.s || keys.down) moveY = 1;
+                if (keys.a || keys.left) moveX = -1;
+                if (keys.d || keys.right) moveX = 1;
+                const len = Math.hypot(moveX, moveY);
+                if (len > 0) { moveX /= len;
+                    moveY /= len; }
+            }
+
+            // ---- Facing ----
+            if (moveX !== 0 || moveY !== 0) {
+                player.facing = Math.atan2(moveY, moveX);
             }
 
             // ---- Movement Physics ----
@@ -420,70 +447,29 @@
                 if (player.trail[i].life <= 0) player.trail.splice(i, 1);
             }
 
-            // ---- Sword Swing Logic (Slow Draw -> Fast Swing) ----
-            if (sword.swinging) {
-                sword.swingTimer -= dt;
-                const progress = 1 - (sword.swingTimer / sword.swingDuration);
-                const totalArc = 260; // degrees (increased)
-                const drawPhase = 0.25; // 25% of time for drawing
-                const swingPhase = 1 - drawPhase;
-
-                let angleOffset = 0;
-                if (progress < drawPhase) {
-                    // SLOW DRAW
-                    const localP = progress / drawPhase;
-                    // Move from -10 deg to +10 deg during draw
-                    const drawArc = 20;
-                    angleOffset = -drawArc / 2 + localP * drawArc;
-                } else {
-                    // FAST SWING
-                    const localP = (progress - drawPhase) / swingPhase;
-                    // Ease-in (accelerating)
-                    const easedP = localP * localP * localP;
-                    const swingArc = totalArc - 20;
-                    angleOffset = 10 + easedP * swingArc;
-                }
-
-                // Apply the angle offset to the start angle
-                const angleRad = (angleOffset * Math.PI) / 180;
-                sword.currentAngle = sword.startAngle + angleRad;
-
-                // Spawn particles during swing
-                if (Math.random() < 0.6 * dtFactor) {
-                    spawnSwordSlash(player.x, player.y, sword.currentAngle, 3);
-                }
-
-                // Trigger Flash at the peak of the fast swing
-                if (progress > 0.35 && progress < 0.45) {
-                    flashAlpha = 1.0;
-                }
-
-                // End swing
-                if (sword.swingTimer <= 0) {
-                    sword.swinging = false;
-                    sword.currentAngle = sword.startAngle;
-                    sword.cooldownTimer = sword.cooldownDuration;
-                    swordStatus.textContent = 'READY';
-                }
-            } else {
-                // Not swinging: sword points to joystick angle (if active) or last target
-                if (joystick.active) {
-                    sword.angle = joystick.angle;
-                    sword.targetAngle = joystick.angle;
-                }
+            // ---- Shotgun cooldown ----
+            if (shotgun.cooldown > 0) {
+                shotgun.cooldown -= dt;
+                if (shotgun.cooldown < 0) shotgun.cooldown = 0;
             }
 
-            // Sword cooldown
-            if (sword.cooldownTimer > 0) {
-                sword.cooldownTimer -= dt;
-                if (sword.cooldownTimer < 0) sword.cooldownTimer = 0;
-                if (sword.cooldownTimer > 0) swordStatus.textContent = 'COOLDOWN';
-            }
+            // ---- Bullets ----
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.x += b.vx * dtFactor;
+                b.y += b.vy * dtFactor;
+                b.age += dt;
+                // Life based on distance
+                const traveled = dist(b.originX, b.originY, b.x, b.y);
+                const lifeRatio = 1 - Math.min(traveled / shotgun.maxRange, 1);
+                b.life = lifeRatio;
+                // Damage falloff
+                b.damage = shotgun.damageBase * lifeRatio;
 
-            // Sword trail
-            for (let i = sword.trail.length - 1; i >= 0; i--) {
-                sword.trail[i].life -= 0.03 * dtFactor;
-                if (sword.trail[i].life <= 0) sword.trail.splice(i, 1);
+                // Remove if out of range or off screen
+                if (traveled > shotgun.maxRange || b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
+                    bullets.splice(i, 1);
+                }
             }
 
             // ---- Particles ----
@@ -516,10 +502,12 @@
 
             if (player.flashTimer > 0) player.flashTimer -= dt;
 
-            // ---- Flash Fade ----
-            if (flashAlpha > 0) {
-                flashAlpha *= 0.92;
-                if (flashAlpha < 0.01) flashAlpha = 0;
+            // ---- Joystick magnitude ----
+            if (moveJoystick.active) {
+                const mag = Math.hypot(moveJoystick.dx, moveJoystick.dy);
+                moveJoystick.magnitude = Math.min(mag / moveJoystick.radius, 1);
+            } else {
+                moveJoystick.magnitude = 0;
             }
         }
 
@@ -527,7 +515,7 @@
         function render() {
             ctx.save();
 
-            // ---- Screen shake ----
+            // ---- Shake ----
             let shakeX = 0,
                 shakeY = 0;
             if (window.shakeTimer > 0 && window.shakeAmount > 0.1) {
@@ -561,16 +549,6 @@
                 ctx.stroke();
             }
 
-            // ---- Glow ring ----
-            const grd = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 140);
-            grd.addColorStop(0, 'rgba(0, 180, 255, 0.06)');
-            grd.addColorStop(0.5, 'rgba(0, 180, 255, 0.02)');
-            grd.addColorStop(1, 'rgba(0, 180, 255, 0)');
-            ctx.fillStyle = grd;
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, 140, 0, Math.PI * 2);
-            ctx.fill();
-
             // ---- Player Trail ----
             for (const t of player.trail) {
                 const alpha = t.life * 0.3;
@@ -581,6 +559,28 @@
                 ctx.shadowBlur = 15;
                 ctx.beginPath();
                 ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+
+            // ---- Bullets ----
+            for (const b of bullets) {
+                const alpha = b.life * 0.8;
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = `hsl(40, 100%, ${50 + 30 * b.life}%)`;
+                ctx.shadowColor = `rgba(255, 200, 100, ${alpha * 0.5})`;
+                ctx.shadowBlur = 15;
+                const size = 3 + 4 * b.life;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Glow trail
+                ctx.shadowBlur = 30;
+                ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.2})`;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, size * 2.5, 0, Math.PI * 2);
                 ctx.fill();
             }
             ctx.globalAlpha = 1;
@@ -599,30 +599,6 @@
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
 
-            // ---- Sword Trail ----
-            for (const t of sword.trail) {
-                ctx.globalAlpha = t.life * 0.25;
-                ctx.strokeStyle = `hsl(40, 100%, 70%)`;
-                ctx.lineWidth = 3 * t.life; // reduced thickness
-                ctx.shadowColor = `rgba(255, 200, 100, ${t.life * 0.3})`;
-                ctx.shadowBlur = 20;
-                const swx = t.x + Math.cos(t.angle) * sword.length;
-                const swy = t.y + Math.sin(t.angle) * sword.length;
-                ctx.beginPath();
-                ctx.moveTo(t.x, t.y);
-                ctx.lineTo(swx, swy);
-                ctx.stroke();
-            }
-            ctx.globalAlpha = 1;
-            ctx.shadowBlur = 0;
-
-            // ---- Draw the Katana (held beside the player, following mouse) ----
-            const handX = player.x + Math.cos(player.facing) * 22;
-            const handY = player.y + Math.sin(player.facing) * 22;
-            const swingProgress = sword.swinging ? 1 - (sword.swingTimer / sword.swingDuration) : 0;
-
-            drawKatana(ctx, handX, handY, sword.currentAngle, swingProgress);
-
             // ---- Player Body ----
             const px = player.x;
             const py = player.y;
@@ -637,6 +613,18 @@
             ctx.beginPath();
             ctx.arc(px, py, r * 2.5, 0, Math.PI * 2);
             ctx.fill();
+
+            // Dash ring
+            if (player.isDashing) {
+                ctx.strokeStyle = 'rgba(0, 230, 255, 0.2)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 8]);
+                const ringR = r * 1.7 + Math.sin(Date.now() / 70) * 4;
+                ctx.beginPath();
+                ctx.arc(px, py, ringR, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
 
             if (player.isDashing) {
                 // Triangle
@@ -719,29 +707,11 @@
 
             ctx.shadowBlur = 0;
 
-            // ---- WHITE FLASH (Power indicator) ----
-            if (flashAlpha > 0) {
-                ctx.save();
-                const gradFlash = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 500);
-                gradFlash.addColorStop(0, `rgba(255, 255, 255, ${flashAlpha * 0.9})`);
-                gradFlash.addColorStop(0.3, `rgba(255, 255, 255, ${flashAlpha * 0.5})`);
-                gradFlash.addColorStop(1, `rgba(255, 255, 255, 0)`);
-                ctx.fillStyle = gradFlash;
-                ctx.fillRect(0, 0, W, H);
-
-                // Extra bright core
-                const coreGrad = ctx.createRadialGradient(player.x, player.y, 5, player.x, player.y, 150);
-                coreGrad.addColorStop(0, `rgba(255, 255, 255, ${flashAlpha * 0.6})`);
-                coreGrad.addColorStop(1, `rgba(255, 255, 255, 0)`);
-                ctx.fillStyle = coreGrad;
-                ctx.beginPath();
-                ctx.arc(player.x, player.y, 150, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.restore();
-            }
-
-            // ---- Joystick ----
+            // ---- Draw Joystick ----
             drawJoystick();
+
+            // ---- Draw Buttons ----
+            drawButtons();
 
             ctx.restore();
 
@@ -801,92 +771,15 @@
             }
         }
 
-        // ---------- DRAW KATANA (thinner, elegant) ----------
-        function drawKatana(ctx, x, y, angle, progress) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-
-            // Handle (Tsuka) - 25px long, thinner
-            ctx.fillStyle = '#2c1a0e';
-            ctx.shadowColor = 'rgba(0,0,0,0.3)';
-            ctx.shadowBlur = 8;
-            ctx.fillRect(-8, -3, 25, 6); // thinner
-
-            // Handle wrapping (thinner)
-            ctx.shadowBlur = 0;
-            ctx.strokeStyle = '#4a2a1a';
-            ctx.lineWidth = 1;
-            for (let i = -4; i < 22; i += 3) {
-                ctx.beginPath();
-                ctx.moveTo(i, -3);
-                ctx.lineTo(i + 1, 0);
-                ctx.lineTo(i, 3);
-                ctx.stroke();
-            }
-
-            // Guard (Tsuba) - thinner
-            ctx.shadowBlur = 5;
-            ctx.fillStyle = '#d4a843';
-            ctx.beginPath();
-            ctx.ellipse(17, 0, 4, 7, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#8a6e2a';
-            ctx.lineWidth = 0.8;
-            ctx.stroke();
-
-            // Blade (Nagasa) - 60px long, thinner
-            ctx.shadowBlur = 10;
-            ctx.shadowColor = 'rgba(255,255,255,0.1)';
-            ctx.beginPath();
-            ctx.moveTo(17, -4);
-            ctx.quadraticCurveTo(50, -6, 77, 0);
-            ctx.quadraticCurveTo(50, 6, 17, 4);
-            ctx.closePath();
-
-            let grad = ctx.createLinearGradient(17, -4, 17, 4);
-            grad.addColorStop(0, '#b0b8c4');
-            grad.addColorStop(0.3, '#ffffff');
-            grad.addColorStop(0.7, '#ffffff');
-            grad.addColorStop(1, '#8a929e');
-            ctx.fillStyle = grad;
-            ctx.fill();
-            ctx.strokeStyle = '#6a727e';
-            ctx.lineWidth = 0.5;
-            ctx.stroke();
-
-            // Blade edge (Hamon) - thinner wave
-            ctx.beginPath();
-            ctx.moveTo(17, -1);
-            for (let i = 19; i < 77; i += 2) {
-                const wave = Math.sin(i * 0.7 + 1) * 1.8;
-                ctx.lineTo(i, -1 + wave);
-            }
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 1;
-            ctx.shadowBlur = 0;
-            ctx.stroke();
-
-            // Tip (Kissaki)
-            ctx.beginPath();
-            ctx.arc(77, 0, 2, 0, Math.PI * 2);
-            ctx.fillStyle = '#e0e5ec';
-            ctx.shadowBlur = 8;
-            ctx.shadowColor = 'rgba(255,255,255,0.3)';
-            ctx.fill();
-
-            ctx.restore();
-        }
-
-        // ---------- JOYSTICK DRAW ----------
+        // ---------- DRAW JOYSTICK ----------
         function drawJoystick() {
-            const j = joystick;
+            const j = moveJoystick;
             const cx = j.x,
                 cy = j.y;
             ctx.save();
             ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
             ctx.shadowBlur = 15;
-            ctx.fillStyle = 'rgba(20, 35, 50, 0.5)';
+            ctx.fillStyle = 'rgba(20, 35, 50, 0.6)';
             ctx.strokeStyle = 'rgba(80, 140, 180, 0.25)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -922,16 +815,56 @@
             ctx.fillStyle = 'rgba(120, 180, 210, 0.4)';
             ctx.font = '10px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('⚔️ AIM', cx, cy + j.radius + 22);
+            ctx.fillText('MOVE', cx, cy + j.radius + 22);
+            ctx.restore();
+        }
+
+        // ---------- DRAW BUTTONS ----------
+        function drawButtons() {
+            // Shoot button
+            ctx.save();
+            const sx = shootButton.x,
+                sy = shootButton.y;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = 'rgba(40, 60, 80, 0.7)';
+            ctx.strokeStyle = 'rgba(200, 100, 50, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, shootButton.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#ff8a65';
+            ctx.font = 'bold 18px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🔫', sx, sy);
+            ctx.restore();
+
+            // Dash button
+            ctx.save();
+            const dx = dashButton.x,
+                dy = dashButton.y;
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = 'rgba(40, 60, 80, 0.7)';
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(dx, dy, dashButton.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#4dd0e1';
+            ctx.font = 'bold 16px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('⚡', dx, dy);
             ctx.restore();
         }
 
         // ---------- TOUCH / MOUSE HANDLING ----------
-        function isInsideJoystick(tx, ty) {
-            const j = joystick;
-            return (tx - j.x) ** 2 + (ty - j.y) ** 2 < (j.radius + 30) ** 2;
-        }
-
         function getCanvasCoords(e) {
             const rect = canvas.getBoundingClientRect();
             const scaleX = canvas.width / rect.width;
@@ -942,30 +875,48 @@
             };
         }
 
+        function isInside(x, y, cx, cy, radius) {
+            return (x - cx) ** 2 + (y - cy) ** 2 < radius ** 2;
+        }
+
         // Touch events
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touches = e.touches;
 
-            // Double touch -> Dash
-            if (touches.length === 2) {
-                performDash();
-                return;
-            }
-
             for (let i = 0; i < touches.length; i++) {
                 const touch = touches[i];
                 const { x, y } = getCanvasCoords(touch);
 
-                if (isInsideJoystick(x, y) && !joystick.active) {
-                    joystick.active = true;
-                    joystick.touchId = touch.identifier;
-                    joystick.dx = 0;
-                    joystick.dy = 0;
-                    joystick.angle = 0;
-                } else if (!activePointer) {
-                    activePointer = { x, y, id: touch.identifier };
+                // Check joystick
+                if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
+                    if (!moveJoystick.active) {
+                        moveJoystick.active = true;
+                        moveJoystick.touchId = touch.identifier;
+                        moveJoystick.dx = x - moveJoystick.x;
+                        moveJoystick.dy = y - moveJoystick.y;
+                        const maxDist = moveJoystick.radius * 0.6;
+                        const dist = Math.hypot(moveJoystick.dx, moveJoystick.dy);
+                        if (dist > maxDist) {
+                            moveJoystick.dx = (moveJoystick.dx / dist) * maxDist;
+                            moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
+                        }
+                    }
                 }
+                // Check shoot button
+                else if (isInside(x, y, shootButton.x, shootButton.y, shootButton.radius + 20)) {
+                    shootButton.active = true;
+                    shootButton.touchId = touch.identifier;
+                    shoot();
+                }
+                // Check dash button
+                else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
+                    dashButton.active = true;
+                    dashButton.touchId = touch.identifier;
+                    performDash();
+                }
+                // If not on any button, maybe we can also shoot by tapping anywhere else?
+                // We'll ignore for now, only shoot via button.
             }
         }, { passive: false });
 
@@ -977,45 +928,14 @@
                 const touch = touches[i];
                 const { x, y } = getCanvasCoords(touch);
 
-                if (joystick.active && touch.identifier === joystick.touchId) {
-                    joystick.dx = x - joystick.x;
-                    joystick.dy = y - joystick.y;
-                    const maxDist = joystick.radius * 0.6;
-                    const dist = Math.hypot(joystick.dx, joystick.dy);
+                if (moveJoystick.active && touch.identifier === moveJoystick.touchId) {
+                    moveJoystick.dx = x - moveJoystick.x;
+                    moveJoystick.dy = y - moveJoystick.y;
+                    const maxDist = moveJoystick.radius * 0.6;
+                    const dist = Math.hypot(moveJoystick.dx, moveJoystick.dy);
                     if (dist > maxDist) {
-                        joystick.dx = (joystick.dx / dist) * maxDist;
-                        joystick.dy = (joystick.dy / dist) * maxDist;
-                    }
-                    joystick.angle = Math.atan2(joystick.dy, joystick.dx);
-                    // Update facing towards joystick touch
-                    if (activePointer) {
-                        if (activePointer.id === touch.identifier) {
-                            activePointer.x = x;
-                            activePointer.y = y;
-                        }
-                    } else {
-                        activePointer = { x, y, id: touch.identifier };
-                    }
-                } else if (activePointer && activePointer.id === touch.identifier) {
-                    activePointer.x = x;
-                    activePointer.y = y;
-                    // Update movement keys based on pointer position
-                    const dx = x - player.x;
-                    const dy = y - player.y;
-                    const dist2 = Math.hypot(dx, dy);
-                    if (dist2 > 15) {
-                        const nx = dx / dist2;
-                        const ny = dy / dist2;
-                        keys.d = nx > 0.3;
-                        keys.a = nx < -0.3;
-                        keys.s = ny > 0.3;
-                        keys.w = ny < -0.3;
-                        keys.up = false;
-                        keys.down = false;
-                        keys.left = false;
-                        keys.right = false;
-                    } else {
-                        keys.w = keys.a = keys.s = keys.d = false;
+                        moveJoystick.dx = (moveJoystick.dx / dist) * maxDist;
+                        moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
                     }
                 }
             }
@@ -1025,154 +945,142 @@
             e.preventDefault();
             const touches = e.touches;
 
-            if (joystick.active) {
+            if (moveJoystick.active) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
-                    if (touches[i].identifier === joystick.touchId) {
+                    if (touches[i].identifier === moveJoystick.touchId) {
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
-                    if (joystick.active) {
-                        performSwordSwing(joystick.angle);
-                    }
-                    joystick.active = false;
-                    joystick.touchId = null;
-                    joystick.dx = 0;
-                    joystick.dy = 0;
+                    moveJoystick.active = false;
+                    moveJoystick.touchId = null;
+                    moveJoystick.dx = 0;
+                    moveJoystick.dy = 0;
                 }
             }
 
-            if (activePointer) {
+            if (shootButton.active) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
-                    if (touches[i].identifier === activePointer.id) {
+                    if (touches[i].identifier === shootButton.touchId) {
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
-                    keys.w = keys.a = keys.s = keys.d = false;
-                    activePointer = null;
+                    shootButton.active = false;
+                    shootButton.touchId = null;
+                }
+            }
+
+            if (dashButton.active) {
+                let found = false;
+                for (let i = 0; i < touches.length; i++) {
+                    if (touches[i].identifier === dashButton.touchId) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    dashButton.active = false;
+                    dashButton.touchId = null;
                 }
             }
         }, { passive: false });
 
         canvas.addEventListener('touchcancel', (e) => {
             e.preventDefault();
-            if (joystick.active) {
-                performSwordSwing(joystick.angle);
-                joystick.active = false;
-                joystick.touchId = null;
-                joystick.dx = 0;
-                joystick.dy = 0;
-            }
-            keys.w = keys.a = keys.s = keys.d = false;
-            activePointer = null;
+            moveJoystick.active = false;
+            moveJoystick.touchId = null;
+            moveJoystick.dx = 0;
+            moveJoystick.dy = 0;
+            shootButton.active = false;
+            shootButton.touchId = null;
+            dashButton.active = false;
+            dashButton.touchId = null;
         }, { passive: false });
 
         // Mouse events (desktop)
         let mouseDown = false;
+        let mouseJoystick = false;
+
         canvas.addEventListener('mousedown', (e) => {
-            mouseDown = true;
             const { x, y } = getCanvasCoords(e);
-            if (isInsideJoystick(x, y)) {
-                joystick.active = true;
-                joystick.dx = x - joystick.x;
-                joystick.dy = y - joystick.y;
-                const maxDist = joystick.radius * 0.6;
-                const dist = Math.hypot(joystick.dx, joystick.dy);
+            mouseDown = true;
+
+            if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
+                mouseJoystick = true;
+                moveJoystick.active = true;
+                moveJoystick.dx = x - moveJoystick.x;
+                moveJoystick.dy = y - moveJoystick.y;
+                const maxDist = moveJoystick.radius * 0.6;
+                const dist = Math.hypot(moveJoystick.dx, moveJoystick.dy);
                 if (dist > maxDist) {
-                    joystick.dx = (joystick.dx / dist) * maxDist;
-                    joystick.dy = (joystick.dy / dist) * maxDist;
+                    moveJoystick.dx = (moveJoystick.dx / dist) * maxDist;
+                    moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
                 }
-                joystick.angle = Math.atan2(joystick.dy, joystick.dx);
-                activePointer = { x, y, id: 'mouse' };
-            } else {
-                activePointer = { x, y, id: 'mouse' };
-                const dx = x - player.x;
-                const dy = y - player.y;
-                if (Math.hypot(dx, dy) > 15) {
-                    const nx = dx / Math.hypot(dx, dy);
-                    const ny = dy / Math.hypot(dx, dy);
-                    keys.d = nx > 0.3;
-                    keys.a = nx < -0.3;
-                    keys.s = ny > 0.3;
-                    keys.w = ny < -0.3;
-                }
+            } else if (isInside(x, y, shootButton.x, shootButton.y, shootButton.radius + 20)) {
+                shoot();
+            } else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
+                performDash();
             }
         });
 
         canvas.addEventListener('mousemove', (e) => {
             const { x, y } = getCanvasCoords(e);
-            if (mouseDown && activePointer) {
-                activePointer.x = x;
-                activePointer.y = y;
-                if (joystick.active) {
-                    joystick.dx = x - joystick.x;
-                    joystick.dy = y - joystick.y;
-                    const maxDist = joystick.radius * 0.6;
-                    const dist = Math.hypot(joystick.dx, joystick.dy);
-                    if (dist > maxDist) {
-                        joystick.dx = (joystick.dx / dist) * maxDist;
-                        joystick.dy = (joystick.dy / dist) * maxDist;
-                    }
-                    joystick.angle = Math.atan2(joystick.dy, joystick.dx);
-                } else {
-                    const dx = x - player.x;
-                    const dy = y - player.y;
-                    if (Math.hypot(dx, dy) > 15) {
-                        const nx = dx / Math.hypot(dx, dy);
-                        const ny = dy / Math.hypot(dx, dy);
-                        keys.d = nx > 0.3;
-                        keys.a = nx < -0.3;
-                        keys.s = ny > 0.3;
-                        keys.w = ny < -0.3;
-                    } else {
-                        keys.w = keys.a = keys.s = keys.d = false;
-                    }
+            if (mouseDown && mouseJoystick && moveJoystick.active) {
+                moveJoystick.dx = x - moveJoystick.x;
+                moveJoystick.dy = y - moveJoystick.y;
+                const maxDist = moveJoystick.radius * 0.6;
+                const dist = Math.hypot(moveJoystick.dx, moveJoystick.dy);
+                if (dist > maxDist) {
+                    moveJoystick.dx = (moveJoystick.dx / dist) * maxDist;
+                    moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
                 }
             }
         });
 
         canvas.addEventListener('mouseup', (e) => {
             mouseDown = false;
-            if (joystick.active) {
-                performSwordSwing(joystick.angle);
-                joystick.active = false;
-                joystick.dx = 0;
-                joystick.dy = 0;
+            mouseJoystick = false;
+            if (moveJoystick.active) {
+                moveJoystick.active = false;
+                moveJoystick.dx = 0;
+                moveJoystick.dy = 0;
             }
-            keys.w = keys.a = keys.s = keys.d = false;
-            activePointer = null;
         });
 
         canvas.addEventListener('mouseleave', () => {
             if (mouseDown) {
-                if (joystick.active) {
-                    performSwordSwing(joystick.angle);
-                    joystick.active = false;
-                    joystick.dx = 0;
-                    joystick.dy = 0;
-                }
-                keys.w = keys.a = keys.s = keys.d = false;
                 mouseDown = false;
-                activePointer = null;
+                mouseJoystick = false;
+                if (moveJoystick.active) {
+                    moveJoystick.active = false;
+                    moveJoystick.dx = 0;
+                    moveJoystick.dy = 0;
+                }
             }
         });
 
         // Keyboard fallback
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
-            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key) || e.key === ' ') {
+            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(key) || e.key === ' ') {
                 e.preventDefault();
             }
             if (key === 'w' || e.key === 'ArrowUp') keys.up = true;
             if (key === 's' || e.key === 'ArrowDown') keys.down = true;
             if (key === 'a' || e.key === 'ArrowLeft') keys.left = true;
             if (key === 'd' || e.key === 'ArrowRight') keys.right = true;
-            if (key === ' ' || e.key === 'Shift') performDash();
+            if (key === ' ' || e.key === 'Shift') {
+                performDash();
+            }
+            // Shoot with 'f' or 'j'
+            if (key === 'f' || key === 'j') {
+                shoot();
+            }
         });
 
         window.addEventListener('keyup', (e) => {
@@ -1214,10 +1122,11 @@
 
         requestAnimationFrame(gameLoop);
 
-        console.log('⚔️ Katana & Dash Game');
-        console.log('🟢 Move: drag on canvas (or WASD on desktop)');
-        console.log('⚡ Dash: two-finger tap (or Space on desktop)');
-        console.log('🗡️ Aim sword: drag joystick (top-left), release to swing!');
+        console.log('🔫 Shotgun & Dash Game');
+        console.log('🟢 Move: drag left joystick (or WASD on desktop)');
+        console.log('⚡ Dash: press dash button (or Space/Shift on desktop)');
+        console.log('🔫 Shoot: press shoot button (or F/J on desktop)');
+        console.log('💥 Damage decreases with distance!');
     </script>
 </body>
 </html>
