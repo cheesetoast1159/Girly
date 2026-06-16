@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Shotgun · Twin Stick</title>
+    <title>Drone Hunter</title>
     <style>
         * {
             margin: 0;
@@ -130,6 +130,10 @@
                     <span style="color:#4a7a8a;">SPEED</span>
                     <span id="speedDisplay" style="color:#8ac4e0; font-weight:600; min-width:40px;">0</span>
                 </div>
+                <div class="indicator">
+                    <span style="color:#4a7a8a;">ENEMIES</span>
+                    <span id="enemyCount" style="color:#ff8a65; font-weight:600;">0</span>
+                </div>
             </div>
             <div class="info">
                 <span style="color:#4a7a8a;">🔫</span>
@@ -144,6 +148,7 @@
         const dashDot = document.getElementById('dashDot');
         const speedDisplay = document.getElementById('speedDisplay');
         const ammoStatus = document.getElementById('ammoStatus');
+        const enemyCount = document.getElementById('enemyCount');
 
         const W = 900,
             H = 600;
@@ -152,41 +157,44 @@
         const player = {
             x: W / 2,
             y: H / 2,
-            radius: 20,
-            speed: 7.2, // DOUBLED
+            radius: 14, // reduced
+            speed: 3.5, // reduced
             vx: 0,
             vy: 0,
-            friction: 0.94, // Adjusted for higher speed
-            accel: 0.9, // DOUBLED
+            friction: 0.92,
+            accel: 0.6,
             facing: 0,
 
-            // Dash
             isDashing: false,
             dashMultiplier: 1,
-            dashDuration: 280, // Slightly reduced
+            dashDuration: 280,
             dashCooldown: 1200,
             dashTimer: 0,
             cooldownTimer: 0,
-            dashSpeedBoost: 18.0, // DOUBLED
+            dashSpeedBoost: 9.0, // reduced
 
             trail: [],
-            maxTrail: 35,
+            maxTrail: 30,
             flashTimer: 0,
         };
 
         // ---------- SHOTGUN ----------
         const shotgun = {
             cooldown: 0,
-            cooldownDuration: 200, // Faster fire rate
+            cooldownDuration: 250,
             pelletCount: 8,
             spread: 0.3,
-            pelletSpeed: 24, // DOUBLED
-            maxRange: 500,
-            damageBase: 20,
+            pelletSpeed: 8, // reduced
+            maxRange: 400,
+            damageBase: 2, // each pellet deals 2 damage
         };
 
-        // ---------- BULLETS ----------
+        // ---------- BULLETS (player) ----------
         let bullets = [];
+
+        // ---------- ENEMIES ----------
+        let enemies = [];
+        let enemyProjectiles = [];
 
         // ---------- JOYSTICKS ----------
         const aimJoystick = {
@@ -199,6 +207,8 @@
             dx: 0,
             dy: 0,
             angle: 0,
+            // track if we should shoot on release
+            shouldShootOnRelease: false,
         };
 
         const moveJoystick = {
@@ -215,11 +225,10 @@
 
         // ---------- BUTTONS ----------
         const shootButton = {
-            x: 770,
-            y: 120,
-            radius: 45,
-            active: false,
-            touchId: null,
+            // we no longer use shoot button; it's now joystick release
+            x: 0,
+            y: 0,
+            radius: 0,
         };
 
         const dashButton = {
@@ -253,16 +262,16 @@
         // ---------- PARTICLES ----------
         function spawnDashParticles(x, y, angle, count = 28) {
             for (let i = 0; i < count; i++) {
-                const speed = 3 + Math.random() * 8;
+                const speed = 2 + Math.random() * 6;
                 const a = angle + (Math.random() - 0.5) * 1.4;
-                const size = 3 + Math.random() * 7;
+                const size = 2 + Math.random() * 6;
                 particles.push({
-                    x: x + (Math.random() - 0.5) * 14,
-                    y: y + (Math.random() - 0.5) * 14,
+                    x: x + (Math.random() - 0.5) * 12,
+                    y: y + (Math.random() - 0.5) * 12,
                     vx: Math.cos(a) * speed * (0.6 + Math.random() * 0.6),
                     vy: Math.sin(a) * speed * (0.6 + Math.random() * 0.6),
                     life: 1,
-                    decay: 0.006 + Math.random() * 0.012,
+                    decay: 0.008 + Math.random() * 0.015,
                     size: size,
                     maxSize: size,
                     color: `hsl(${190 + Math.random() * 30}, 100%, ${65 + Math.random() * 30}%)`,
@@ -270,32 +279,32 @@
             }
         }
 
-        function spawnTrailParticles(x, y, angle, count = 8) {
+        function spawnTrailParticles(x, y, angle, count = 6) {
             for (let i = 0; i < count; i++) {
-                const speed = 1.5 + Math.random() * 3.5;
+                const speed = 1 + Math.random() * 2.5;
                 const a = angle + (Math.random() - 0.5) * 0.8;
                 particles.push({
-                    x: x + (Math.random() - 0.5) * 8,
-                    y: y + (Math.random() - 0.5) * 8,
+                    x: x + (Math.random() - 0.5) * 6,
+                    y: y + (Math.random() - 0.5) * 6,
                     vx: Math.cos(a) * speed * 0.5,
                     vy: Math.sin(a) * speed * 0.5,
                     life: 1,
-                    decay: 0.02 + Math.random() * 0.03,
-                    size: 2 + Math.random() * 4,
-                    maxSize: 5,
+                    decay: 0.025 + Math.random() * 0.035,
+                    size: 1.5 + Math.random() * 3,
+                    maxSize: 4,
                     color: `hsl(${200 + Math.random() * 40}, 90%, ${70 + Math.random() * 25}%)`,
                 });
             }
         }
 
-        function spawnMuzzleFlash(x, y, angle, count = 20) {
+        function spawnMuzzleFlash(x, y, angle, count = 18) {
             for (let i = 0; i < count; i++) {
-                const speed = 2 + Math.random() * 8;
-                const a = angle + (Math.random() - 0.5) * 0.8;
-                const size = 2 + Math.random() * 6;
+                const speed = 1.5 + Math.random() * 5;
+                const a = angle + (Math.random() - 0.5) * 0.7;
+                const size = 2 + Math.random() * 5;
                 particles.push({
-                    x: x + Math.cos(angle) * 10 + (Math.random() - 0.5) * 10,
-                    y: y + Math.sin(angle) * 10 + (Math.random() - 0.5) * 10,
+                    x: x + Math.cos(angle) * 8 + (Math.random() - 0.5) * 8,
+                    y: y + Math.sin(angle) * 8 + (Math.random() - 0.5) * 8,
                     vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
                     vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
                     life: 1,
@@ -303,6 +312,24 @@
                     size: size,
                     maxSize: size,
                     color: `hsl(40, 100%, ${70 + Math.random() * 25}%)`,
+                });
+            }
+        }
+
+        function spawnEnemyDeath(x, y) {
+            for (let i = 0; i < 20; i++) {
+                const speed = 1 + Math.random() * 4;
+                const a = Math.random() * Math.PI * 2;
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 10,
+                    y: y + (Math.random() - 0.5) * 10,
+                    vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
+                    vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
+                    life: 1,
+                    decay: 0.01 + Math.random() * 0.02,
+                    size: 2 + Math.random() * 4,
+                    maxSize: 6,
+                    color: `hsl(0, 80%, ${50 + Math.random() * 30}%)`,
                 });
             }
         }
@@ -316,30 +343,30 @@
             player.dashTimer = player.dashDuration;
             player.dashMultiplier = player.dashSpeedBoost;
 
-            spawnDashParticles(player.x, player.y, player.facing, 40);
-            for (let i = 0; i < 12; i++) {
-                spawnTrailParticles(player.x, player.y, player.facing + (Math.random() - 0.5) * 0.8, 5);
+            spawnDashParticles(player.x, player.y, player.facing, 35);
+            for (let i = 0; i < 10; i++) {
+                spawnTrailParticles(player.x, player.y, player.facing + (Math.random() - 0.5) * 0.8, 4);
             }
 
-            player.flashTimer = 120;
-            window.shakeAmount = 10;
-            window.shakeTimer = 180;
+            player.flashTimer = 100;
+            window.shakeAmount = 8;
+            window.shakeTimer = 150;
         }
 
-        // ---------- SHOOT ----------
-        function shoot() {
+        // ---------- SHOOT (now called on joystick release) ----------
+        function shoot(angle) {
             if (shotgun.cooldown > 0) return;
 
             shotgun.cooldown = shotgun.cooldownDuration;
-            const angle = player.facing;
+            player.facing = angle; // ensure facing matches aim
 
-            spawnMuzzleFlash(player.x, player.y, angle, 25);
+            spawnMuzzleFlash(player.x, player.y, angle, 20);
 
             for (let i = 0; i < shotgun.pelletCount; i++) {
                 const spreadAngle = angle + (Math.random() - 0.5) * shotgun.spread;
                 const speed = shotgun.pelletSpeed * (0.8 + Math.random() * 0.4);
-                const originX = player.x + Math.cos(angle) * 25;
-                const originY = player.y + Math.sin(angle) * 25;
+                const originX = player.x + Math.cos(angle) * 22;
+                const originY = player.y + Math.sin(angle) * 22;
                 bullets.push({
                     x: originX,
                     y: originY,
@@ -354,11 +381,38 @@
                 });
             }
 
-            window.shakeAmount = 4;
-            window.shakeTimer = 100;
+            window.shakeAmount = 3;
+            window.shakeTimer = 80;
 
             ammoStatus.textContent = 'BANG!';
             setTimeout(() => { ammoStatus.textContent = 'READY'; }, 200);
+        }
+
+        // ---------- ENEMY ----------
+        function spawnEnemy() {
+            // spawn at random edge
+            let x, y;
+            const side = Math.floor(Math.random() * 4);
+            const margin = 40;
+            if (side === 0) { x = margin + Math.random() * (W - 2 * margin);
+                y = margin; } else if (side === 1) { x = W - margin;
+                y = margin + Math.random() * (H - 2 * margin); } else if (side === 2) { x = margin + Math.random() * (W - 2 *
+                    margin);
+                y = H - margin; } else { x = margin;
+                y = margin + Math.random() * (H - 2 * margin); }
+
+            enemies.push({
+                x: x,
+                y: y,
+                radius: 16,
+                speed: 0.8,
+                vx: 0,
+                vy: 0,
+                health: 5,
+                shootTimer: 0,
+                shootInterval: 3000,
+                angle: 0,
+            });
         }
 
         // ---------- UPDATE ----------
@@ -427,7 +481,7 @@
                     player.vx += (targetDashX - player.vx) * steer * dtFactor;
                     player.vy += (targetDashY - player.vy) * steer * dtFactor;
 
-                    if (Math.random() < 0.6 * dtFactor) {
+                    if (Math.random() < 0.5 * dtFactor) {
                         spawnTrailParticles(player.x, player.y, player.facing + (Math.random() - 0.5) * 0.6, 3);
                     }
                 }
@@ -443,12 +497,40 @@
             player.x += player.vx * dtFactor;
             player.y += player.vy * dtFactor;
 
+            // ---- Wall Bounce (during dash) ----
             const margin = player.radius + 4;
-            player.x = clamp(player.x, margin, W - margin);
-            player.y = clamp(player.y, margin, H - margin);
+            let bounced = false;
+            if (player.isDashing) {
+                if (player.x - player.radius < 0) {
+                    player.x = player.radius;
+                    player.vx = -player.vx * 0.8; // bounce with damping
+                    bounced = true;
+                } else if (player.x + player.radius > W) {
+                    player.x = W - player.radius;
+                    player.vx = -player.vx * 0.8;
+                    bounced = true;
+                }
+                if (player.y - player.radius < 0) {
+                    player.y = player.radius;
+                    player.vy = -player.vy * 0.8;
+                    bounced = true;
+                } else if (player.y + player.radius > H) {
+                    player.y = H - player.radius;
+                    player.vy = -player.vy * 0.8;
+                    bounced = true;
+                }
+                if (bounced) {
+                    // spawn particles on bounce
+                    spawnDashParticles(player.x, player.y, Math.atan2(player.vy, player.vx), 10);
+                }
+            } else {
+                // normal clamping
+                player.x = clamp(player.x, margin, W - margin);
+                player.y = clamp(player.y, margin, H - margin);
+            }
 
             // ---- Player Trail ----
-            if (player.isDashing || Math.abs(player.vx) > 0.6 || Math.abs(player.vy) > 0.6) {
+            if (player.isDashing || Math.abs(player.vx) > 0.4 || Math.abs(player.vy) > 0.4) {
                 player.trail.push({ x: player.x, y: player.y, life: 1 });
                 if (player.trail.length > player.maxTrail) player.trail.shift();
             }
@@ -463,7 +545,7 @@
                 if (shotgun.cooldown < 0) shotgun.cooldown = 0;
             }
 
-            // ---- Bullets ----
+            // ---- Player Bullets ----
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.x += b.vx * dtFactor;
@@ -477,6 +559,125 @@
                 if (traveled > shotgun.maxRange || b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
                     bullets.splice(i, 1);
                 }
+            }
+
+            // ---- Enemy AI ----
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const e = enemies[i];
+                // Move toward player
+                const dx = player.x - e.x;
+                const dy = player.y - e.y;
+                const d = Math.hypot(dx, dy);
+                if (d > 1) {
+                    e.vx += (dx / d * e.speed - e.vx) * 0.04 * dtFactor;
+                    e.vy += (dy / d * e.speed - e.vy) * 0.04 * dtFactor;
+                }
+                e.x += e.vx * dtFactor;
+                e.y += e.vy * dtFactor;
+                // Keep within bounds
+                e.x = clamp(e.x, e.radius, W - e.radius);
+                e.y = clamp(e.y, e.radius, H - e.radius);
+
+                // Shoot timer
+                e.shootTimer += dt;
+                if (e.shootTimer >= e.shootInterval) {
+                    e.shootTimer = 0;
+                    // Shoot a projectile toward player
+                    const angle = Math.atan2(player.y - e.y, player.x - e.x);
+                    enemyProjectiles.push({
+                        x: e.x + Math.cos(angle) * (e.radius + 4),
+                        y: e.y + Math.sin(angle) * (e.radius + 4),
+                        vx: Math.cos(angle) * 3.0,
+                        vy: Math.sin(angle) * 3.0,
+                        radius: 6,
+                        life: 1,
+                        damage: 1,
+                    });
+                }
+            }
+
+            // ---- Enemy Projectiles ----
+            for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
+                const p = enemyProjectiles[i];
+                p.x += p.vx * dtFactor;
+                p.y += p.vy * dtFactor;
+                // Remove if out of bounds
+                if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
+                    enemyProjectiles.splice(i, 1);
+                    continue;
+                }
+                // Check collision with player
+                if (dist(p.x, p.y, player.x, player.y) < player.radius + p.radius) {
+                    // Player takes damage (for now just flash and remove projectile)
+                    // We'll implement simple health later, for now just flash and destroy
+                    player.flashTimer = 200;
+                    window.shakeAmount = 4;
+                    window.shakeTimer = 100;
+                    enemyProjectiles.splice(i, 1);
+                    // spawn particles
+                    for (let j = 0; j < 8; j++) {
+                        const a = Math.random() * Math.PI * 2;
+                        const speed = 1 + Math.random() * 3;
+                        particles.push({
+                            x: p.x,
+                            y: p.y,
+                            vx: Math.cos(a) * speed,
+                            vy: Math.sin(a) * speed,
+                            life: 1,
+                            decay: 0.02 + Math.random() * 0.03,
+                            size: 2 + Math.random() * 4,
+                            maxSize: 5,
+                            color: `hsl(0, 80%, 60%)`,
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            // ---- Bullet vs Enemy Collision ----
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                let bulletUsed = false;
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    const e = enemies[j];
+                    if (dist(b.x, b.y, e.x, e.y) < e.radius + 4) {
+                        // Damage enemy
+                        e.health -= b.damage;
+                        bulletUsed = true;
+                        // spawn hit particles
+                        for (let k = 0; k < 4; k++) {
+                            const a = Math.random() * Math.PI * 2;
+                            const speed = 1 + Math.random() * 2;
+                            particles.push({
+                                x: b.x,
+                                y: b.y,
+                                vx: Math.cos(a) * speed,
+                                vy: Math.sin(a) * speed,
+                                life: 1,
+                                decay: 0.03 + Math.random() * 0.04,
+                                size: 2 + Math.random() * 3,
+                                maxSize: 4,
+                                color: `hsl(0, 80%, 70%)`,
+                            });
+                        }
+                        if (e.health <= 0) {
+                            // enemy dies
+                            spawnEnemyDeath(e.x, e.y);
+                            enemies.splice(j, 1);
+                            // spawn a new enemy after delay? we'll spawn one if less than 3
+                        }
+                        break;
+                    }
+                }
+                if (bulletUsed) {
+                    bullets.splice(i, 1);
+                }
+            }
+
+            // ---- Spawn new enemies to keep count ----
+            const maxEnemies = 3;
+            while (enemies.length < maxEnemies) {
+                spawnEnemy();
             }
 
             // ---- Particles ----
@@ -502,6 +703,7 @@
             // ---- UI ----
             const speed = Math.hypot(player.vx, player.vy);
             speedDisplay.textContent = Math.round(speed * 10) / 10;
+            enemyCount.textContent = enemies.length;
 
             if (player.isDashing) dashDot.className = 'dot dashing';
             else if (player.cooldownTimer > 0) dashDot.className = 'dot cooldown';
@@ -550,12 +752,12 @@
 
             // ---- Player Trail ----
             for (const t of player.trail) {
-                const alpha = t.life * 0.3;
+                const alpha = t.life * 0.25;
                 const size = player.radius * 0.5 * t.life;
                 ctx.globalAlpha = alpha;
                 ctx.fillStyle = `hsl(200, 90%, ${60 + 30 * t.life}%)`;
                 ctx.shadowColor = `rgba(0, 180, 255, ${alpha * 0.3})`;
-                ctx.shadowBlur = 15;
+                ctx.shadowBlur = 12;
                 ctx.beginPath();
                 ctx.arc(t.x, t.y, size, 0, Math.PI * 2);
                 ctx.fill();
@@ -563,19 +765,18 @@
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
 
-            // ---- Bullets ----
+            // ---- Player Bullets ----
             for (const b of bullets) {
                 const alpha = b.life * 0.8;
                 ctx.globalAlpha = alpha;
                 ctx.fillStyle = `hsl(40, 100%, ${50 + 30 * b.life}%)`;
                 ctx.shadowColor = `rgba(255, 200, 100, ${alpha * 0.5})`;
                 ctx.shadowBlur = 15;
-                const size = 3 + 4 * b.life;
+                const size = 2 + 3 * b.life;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, size, 0, Math.PI * 2);
                 ctx.fill();
-
-                ctx.shadowBlur = 30;
+                ctx.shadowBlur = 25;
                 ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.2})`;
                 ctx.beginPath();
                 ctx.arc(b.x, b.y, size * 2.5, 0, Math.PI * 2);
@@ -583,6 +784,53 @@
             }
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
+
+            // ---- Enemy Projectiles ----
+            for (const p of enemyProjectiles) {
+                ctx.fillStyle = '#ff5252';
+                ctx.shadowColor = 'rgba(255, 80, 80, 0.6)';
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                // inner glow
+                ctx.fillStyle = 'rgba(255, 200, 200, 0.3)';
+                ctx.shadowBlur = 30;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+
+            // ---- Enemies ----
+            for (const e of enemies) {
+                ctx.save();
+                ctx.translate(e.x, e.y);
+                // Triangle pointing toward player
+                const angle = Math.atan2(player.y - e.y, player.x - e.x);
+                ctx.rotate(angle);
+                const size = e.radius;
+                ctx.fillStyle = '#e53935';
+                ctx.shadowColor = 'rgba(255, 50, 50, 0.4)';
+                ctx.shadowBlur = 20;
+                ctx.beginPath();
+                ctx.moveTo(size, 0);
+                ctx.lineTo(-size * 0.6, -size * 0.6);
+                ctx.lineTo(-size * 0.6, size * 0.6);
+                ctx.closePath();
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = '#ff8a80';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                // Health bar
+                const healthPercent = e.health / 5;
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(-size, -size - 8, size * 2, 4);
+                ctx.fillStyle = healthPercent > 0.3 ? '#4caf50' : '#ff5252';
+                ctx.fillRect(-size, -size - 8, size * 2 * healthPercent, 4);
+                ctx.restore();
+            }
 
             // ---- Particles ----
             for (const p of particles) {
@@ -597,7 +845,7 @@
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
 
-            // ---- Player Body ----
+            // ---- Player ----
             const px = player.x;
             const py = player.y;
             const r = player.radius;
@@ -701,9 +949,9 @@
             ctx.shadowBlur = 0;
 
             // ---- Draw Joysticks & Buttons ----
-            drawJoystick(aimJoystick, 'AIM');
+            drawJoystick(aimJoystick, 'AIM (release to shoot)');
             drawJoystick(moveJoystick, 'MOVE');
-            drawButtons();
+            drawDashButton();
 
             ctx.restore();
 
@@ -803,36 +1051,14 @@
 
             ctx.shadowBlur = 0;
             ctx.fillStyle = 'rgba(120, 180, 210, 0.4)';
-            ctx.font = '10px "Segoe UI", sans-serif';
+            ctx.font = '9px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(label, cx, cy + j.radius + 22);
             ctx.restore();
         }
 
-        // ---------- DRAW BUTTONS ----------
-        function drawButtons() {
-            // Shoot button
-            ctx.save();
-            const sx = shootButton.x,
-                sy = shootButton.y;
-            ctx.shadowColor = 'rgba(0,0,0,0.3)';
-            ctx.shadowBlur = 15;
-            ctx.fillStyle = 'rgba(40, 60, 80, 0.7)';
-            ctx.strokeStyle = 'rgba(200, 100, 50, 0.5)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(sx, sy, shootButton.radius, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.shadowBlur = 0;
-            ctx.fillStyle = '#ff8a65';
-            ctx.font = 'bold 20px "Segoe UI", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('🔫', sx, sy);
-            ctx.restore();
-
-            // Dash button
+        // ---------- DRAW DASH BUTTON ----------
+        function drawDashButton() {
             ctx.save();
             const dx = dashButton.x,
                 dy = dashButton.y;
@@ -869,6 +1095,7 @@
             return (x - cx) ** 2 + (y - cy) ** 2 < radius ** 2;
         }
 
+        // Touch
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touches = e.touches;
@@ -877,7 +1104,6 @@
                 const touch = touches[i];
                 const { x, y } = getCanvasCoords(touch);
 
-                // Aim Joystick (Left)
                 if (isInside(x, y, aimJoystick.x, aimJoystick.y, aimJoystick.radius + 20)) {
                     if (!aimJoystick.active) {
                         aimJoystick.active = true;
@@ -890,10 +1116,9 @@
                             aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
                             aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
                         }
+                        aimJoystick.shouldShootOnRelease = true;
                     }
-                }
-                // Move Joystick (Right)
-                else if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
+                } else if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
                     if (!moveJoystick.active) {
                         moveJoystick.active = true;
                         moveJoystick.touchId = touch.identifier;
@@ -906,15 +1131,7 @@
                             moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
                         }
                     }
-                }
-                // Shoot Button
-                else if (isInside(x, y, shootButton.x, shootButton.y, shootButton.radius + 20)) {
-                    shootButton.active = true;
-                    shootButton.touchId = touch.identifier;
-                    shoot();
-                }
-                // Dash Button
-                else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
+                } else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
                     dashButton.active = true;
                     dashButton.touchId = touch.identifier;
                     performDash();
@@ -958,6 +1175,7 @@
             e.preventDefault();
             const touches = e.touches;
 
+            // Aim joystick release -> shoot if it was active and we had a touch
             if (aimJoystick.active) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
@@ -967,6 +1185,14 @@
                     }
                 }
                 if (!found) {
+                    // Shoot!
+                    if (aimJoystick.shouldShootOnRelease) {
+                        const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
+                        if (Math.hypot(aimJoystick.dx, aimJoystick.dy) > 5) {
+                            shoot(angle);
+                        }
+                        aimJoystick.shouldShootOnRelease = false;
+                    }
                     aimJoystick.active = false;
                     aimJoystick.touchId = null;
                     aimJoystick.dx = 0;
@@ -990,20 +1216,6 @@
                 }
             }
 
-            if (shootButton.active) {
-                let found = false;
-                for (let i = 0; i < touches.length; i++) {
-                    if (touches[i].identifier === shootButton.touchId) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    shootButton.active = false;
-                    shootButton.touchId = null;
-                }
-            }
-
             if (dashButton.active) {
                 let found = false;
                 for (let i = 0; i < touches.length; i++) {
@@ -1021,6 +1233,13 @@
 
         canvas.addEventListener('touchcancel', (e) => {
             e.preventDefault();
+            if (aimJoystick.active && aimJoystick.shouldShootOnRelease) {
+                const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
+                if (Math.hypot(aimJoystick.dx, aimJoystick.dy) > 5) {
+                    shoot(angle);
+                }
+                aimJoystick.shouldShootOnRelease = false;
+            }
             aimJoystick.active = false;
             aimJoystick.touchId = null;
             aimJoystick.dx = 0;
@@ -1029,13 +1248,11 @@
             moveJoystick.touchId = null;
             moveJoystick.dx = 0;
             moveJoystick.dy = 0;
-            shootButton.active = false;
-            shootButton.touchId = null;
             dashButton.active = false;
             dashButton.touchId = null;
         }, { passive: false });
 
-        // Mouse events (desktop fallback)
+        // Mouse events (desktop)
         let mouseDown = false;
         let mouseOnAim = false;
         let mouseOnMove = false;
@@ -1055,6 +1272,7 @@
                     aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
                     aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
                 }
+                aimJoystick.shouldShootOnRelease = true;
             } else if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
                 mouseOnMove = true;
                 moveJoystick.active = true;
@@ -1066,8 +1284,6 @@
                     moveJoystick.dx = (moveJoystick.dx / dist) * maxDist;
                     moveJoystick.dy = (moveJoystick.dy / dist) * maxDist;
                 }
-            } else if (isInside(x, y, shootButton.x, shootButton.y, shootButton.radius + 20)) {
-                shoot();
             } else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
                 performDash();
             }
@@ -1099,13 +1315,20 @@
 
         canvas.addEventListener('mouseup', (e) => {
             mouseDown = false;
-            mouseOnAim = false;
-            mouseOnMove = false;
-            if (aimJoystick.active) {
+            if (mouseOnAim && aimJoystick.active) {
+                if (aimJoystick.shouldShootOnRelease) {
+                    const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
+                    if (Math.hypot(aimJoystick.dx, aimJoystick.dy) > 5) {
+                        shoot(angle);
+                    }
+                    aimJoystick.shouldShootOnRelease = false;
+                }
                 aimJoystick.active = false;
                 aimJoystick.dx = 0;
                 aimJoystick.dy = 0;
             }
+            mouseOnAim = false;
+            mouseOnMove = false;
             if (moveJoystick.active) {
                 moveJoystick.active = false;
                 moveJoystick.dx = 0;
@@ -1115,14 +1338,21 @@
 
         canvas.addEventListener('mouseleave', () => {
             if (mouseDown) {
-                mouseDown = false;
-                mouseOnAim = false;
-                mouseOnMove = false;
-                if (aimJoystick.active) {
+                if (mouseOnAim && aimJoystick.active) {
+                    if (aimJoystick.shouldShootOnRelease) {
+                        const angle = Math.atan2(aimJoystick.dy, aimJoystick.dx);
+                        if (Math.hypot(aimJoystick.dx, aimJoystick.dy) > 5) {
+                            shoot(angle);
+                        }
+                        aimJoystick.shouldShootOnRelease = false;
+                    }
                     aimJoystick.active = false;
                     aimJoystick.dx = 0;
                     aimJoystick.dy = 0;
                 }
+                mouseDown = false;
+                mouseOnAim = false;
+                mouseOnMove = false;
                 if (moveJoystick.active) {
                     moveJoystick.active = false;
                     moveJoystick.dx = 0;
@@ -1134,7 +1364,7 @@
         // Keyboard fallback
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
-            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift', 'f', 'j'].includes(key) ||
+            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(key) ||
                 e.key === ' ') {
                 e.preventDefault();
             }
@@ -1143,11 +1373,11 @@
             if (key === 'a' || e.key === 'ArrowLeft') keys.left = true;
             if (key === 'd' || e.key === 'ArrowRight') keys.right = true;
             if (key === ' ' || e.key === 'Shift') performDash();
-            if (key === 'f' || key === 'j') shoot();
-
-            // Mouse aim fallback: use arrow keys to aim? No, just keep it simple.
-            // If keyboard is used, we can aim with mouse or just lock to movement direction.
-            // Let's keep the left joystick for aiming even on desktop.
+            // Shoot with mouse click only, or we can use a key like 'j' for shoot
+            if (key === 'j') {
+                // If we want keyboard shoot, we need to use current facing
+                shoot(player.facing);
+            }
         });
 
         window.addEventListener('keyup', (e) => {
@@ -1187,14 +1417,17 @@
             };
         }
 
+        // Spawn initial enemies
+        for (let i = 0; i < 2; i++) spawnEnemy();
+
         requestAnimationFrame(gameLoop);
 
-        console.log('🔫 Twin Stick Shotgun');
+        console.log('🔫 Drone Hunter');
         console.log('🟢 Move: Right Joystick (or WASD)');
-        console.log('🎯 Aim: Left Joystick (or Mouse)');
+        console.log('🎯 Aim & Shoot: Left Joystick (drag to aim, release to fire)');
         console.log('⚡ Dash: Top-Left Button (or Space/Shift)');
-        console.log('🔫 Shoot: Top-Right Button (or F/J)');
         console.log('💥 Damage decreases with distance!');
+        console.log('🤖 Enemies: slow drones that shoot back.');
     </script>
 </body>
 </html>
