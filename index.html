@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Shotgun · Dash & Blast</title>
+    <title>Shotgun · Twin Stick</title>
     <style>
         * {
             margin: 0;
@@ -153,21 +153,21 @@
             x: W / 2,
             y: H / 2,
             radius: 20,
-            speed: 3.6,
+            speed: 7.2, // DOUBLED
             vx: 0,
             vy: 0,
-            friction: 0.88,
-            accel: 0.45,
+            friction: 0.94, // Adjusted for higher speed
+            accel: 0.9, // DOUBLED
             facing: 0,
 
             // Dash
             isDashing: false,
             dashMultiplier: 1,
-            dashDuration: 350,
+            dashDuration: 280, // Slightly reduced
             dashCooldown: 1200,
             dashTimer: 0,
             cooldownTimer: 0,
-            dashSpeedBoost: 9.0,
+            dashSpeedBoost: 18.0, // DOUBLED
 
             trail: [],
             maxTrail: 35,
@@ -177,21 +177,21 @@
         // ---------- SHOTGUN ----------
         const shotgun = {
             cooldown: 0,
-            cooldownDuration: 300, // ms
+            cooldownDuration: 200, // Faster fire rate
             pelletCount: 8,
-            spread: 0.3, // radians total spread
-            pelletSpeed: 12,
-            maxRange: 400, // max distance for damage
+            spread: 0.3,
+            pelletSpeed: 24, // DOUBLED
+            maxRange: 500,
             damageBase: 20,
         };
 
         // ---------- BULLETS ----------
         let bullets = [];
 
-        // ---------- JOYSTICK (movement) ----------
-        const moveJoystick = {
-            x: 120,
-            y: 480, // lower left
+        // ---------- JOYSTICKS ----------
+        const aimJoystick = {
+            x: 140,
+            y: 480,
             radius: 64,
             knobRadius: 26,
             active: false,
@@ -199,21 +199,32 @@
             dx: 0,
             dy: 0,
             angle: 0,
+        };
+
+        const moveJoystick = {
+            x: 760,
+            y: 480,
+            radius: 64,
+            knobRadius: 26,
+            active: false,
+            touchId: null,
+            dx: 0,
+            dy: 0,
             magnitude: 0,
         };
 
         // ---------- BUTTONS ----------
         const shootButton = {
             x: 770,
-            y: 480,
-            radius: 50,
+            y: 120,
+            radius: 45,
             active: false,
             touchId: null,
         };
 
         const dashButton = {
-            x: 50,
-            y: 50,
+            x: 70,
+            y: 70,
             radius: 40,
             active: false,
             touchId: null,
@@ -232,7 +243,6 @@
             down: false,
             left: false,
             right: false,
-            space: false,
         };
 
         // ---------- UTILITY ----------
@@ -278,14 +288,14 @@
             }
         }
 
-        function spawnMuzzleFlash(x, y, angle, count = 15) {
+        function spawnMuzzleFlash(x, y, angle, count = 20) {
             for (let i = 0; i < count; i++) {
-                const speed = 2 + Math.random() * 6;
+                const speed = 2 + Math.random() * 8;
                 const a = angle + (Math.random() - 0.5) * 0.8;
-                const size = 2 + Math.random() * 5;
+                const size = 2 + Math.random() * 6;
                 particles.push({
-                    x: x + Math.cos(angle) * 10 + (Math.random() - 0.5) * 8,
-                    y: y + Math.sin(angle) * 10 + (Math.random() - 0.5) * 8,
+                    x: x + Math.cos(angle) * 10 + (Math.random() - 0.5) * 10,
+                    y: y + Math.sin(angle) * 10 + (Math.random() - 0.5) * 10,
                     vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.5),
                     vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.5),
                     life: 1,
@@ -323,10 +333,8 @@
             shotgun.cooldown = shotgun.cooldownDuration;
             const angle = player.facing;
 
-            // Muzzle flash
-            spawnMuzzleFlash(player.x, player.y, angle, 20);
+            spawnMuzzleFlash(player.x, player.y, angle, 25);
 
-            // Fire pellets
             for (let i = 0; i < shotgun.pelletCount; i++) {
                 const spreadAngle = angle + (Math.random() - 0.5) * shotgun.spread;
                 const speed = shotgun.pelletSpeed * (0.8 + Math.random() * 0.4);
@@ -338,7 +346,7 @@
                     vx: Math.cos(spreadAngle) * speed,
                     vy: Math.sin(spreadAngle) * speed,
                     life: 1,
-                    maxLife: 2000, // ms
+                    maxLife: 2000,
                     age: 0,
                     originX: originX,
                     originY: originY,
@@ -346,9 +354,8 @@
                 });
             }
 
-            // Screen shake
-            window.shakeAmount = 3;
-            window.shakeTimer = 80;
+            window.shakeAmount = 4;
+            window.shakeTimer = 100;
 
             ammoStatus.textContent = 'BANG!';
             setTimeout(() => { ammoStatus.textContent = 'READY'; }, 200);
@@ -358,15 +365,23 @@
         function update(dt) {
             const dtFactor = dt / 16.67;
 
-            // ---- Movement via Joystick ----
+            // ---- Aiming (Left Joystick) ----
+            if (aimJoystick.active) {
+                const mag = Math.hypot(aimJoystick.dx, aimJoystick.dy);
+                if (mag > 5) {
+                    player.facing = Math.atan2(aimJoystick.dy, aimJoystick.dx);
+                }
+            }
+
+            // ---- Movement (Right Joystick) ----
             let moveX = 0,
                 moveY = 0;
             if (moveJoystick.active) {
-                const mag = moveJoystick.magnitude;
-                if (mag > 0.1) {
-                    moveX = moveJoystick.dx / moveJoystick.radius * 0.6; // normalize to max 0.6? Actually we use direct ratio
-                    moveY = moveJoystick.dy / moveJoystick.radius * 0.6;
-                    // Clamp to max 1
+                const maxDist = moveJoystick.radius * 0.6;
+                const mag = Math.hypot(moveJoystick.dx, moveJoystick.dy);
+                if (mag > 5) {
+                    moveX = (moveJoystick.dx / maxDist);
+                    moveY = (moveJoystick.dy / maxDist);
                     const len = Math.hypot(moveX, moveY);
                     if (len > 1) { moveX /= len;
                         moveY /= len; }
@@ -382,11 +397,6 @@
                     moveY /= len; }
             }
 
-            // ---- Facing ----
-            if (moveX !== 0 || moveY !== 0) {
-                player.facing = Math.atan2(moveY, moveX);
-            }
-
             // ---- Movement Physics ----
             const targetVx = moveX * player.speed;
             const targetVy = moveY * player.speed;
@@ -396,8 +406,8 @@
             } else {
                 player.vx *= Math.pow(player.friction, dtFactor * 0.6);
                 player.vy *= Math.pow(player.friction, dtFactor * 0.6);
-                if (Math.abs(player.vx) < 0.02) player.vx = 0;
-                if (Math.abs(player.vy) < 0.02) player.vy = 0;
+                if (Math.abs(player.vx) < 0.05) player.vx = 0;
+                if (Math.abs(player.vy) < 0.05) player.vy = 0;
             }
 
             // ---- Dash ----
@@ -459,14 +469,11 @@
                 b.x += b.vx * dtFactor;
                 b.y += b.vy * dtFactor;
                 b.age += dt;
-                // Life based on distance
                 const traveled = dist(b.originX, b.originY, b.x, b.y);
                 const lifeRatio = 1 - Math.min(traveled / shotgun.maxRange, 1);
                 b.life = lifeRatio;
-                // Damage falloff
                 b.damage = shotgun.damageBase * lifeRatio;
 
-                // Remove if out of range or off screen
                 if (traveled > shotgun.maxRange || b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
                     bullets.splice(i, 1);
                 }
@@ -501,14 +508,6 @@
             else dashDot.className = 'dot ready';
 
             if (player.flashTimer > 0) player.flashTimer -= dt;
-
-            // ---- Joystick magnitude ----
-            if (moveJoystick.active) {
-                const mag = Math.hypot(moveJoystick.dx, moveJoystick.dy);
-                moveJoystick.magnitude = Math.min(mag / moveJoystick.radius, 1);
-            } else {
-                moveJoystick.magnitude = 0;
-            }
         }
 
         // ---------- RENDER ----------
@@ -576,7 +575,6 @@
                 ctx.arc(b.x, b.y, size, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Glow trail
                 ctx.shadowBlur = 30;
                 ctx.fillStyle = `rgba(255, 200, 100, ${alpha * 0.2})`;
                 ctx.beginPath();
@@ -604,7 +602,6 @@
             const py = player.y;
             const r = player.radius;
 
-            // Glow
             const glowGrd = ctx.createRadialGradient(px, py, 5, px, py, r * 2.5);
             const glowColor = player.isDashing ? 'rgba(0, 220, 255, 0.3)' : 'rgba(0, 160, 255, 0.12)';
             glowGrd.addColorStop(0, glowColor);
@@ -614,7 +611,6 @@
             ctx.arc(px, py, r * 2.5, 0, Math.PI * 2);
             ctx.fill();
 
-            // Dash ring
             if (player.isDashing) {
                 ctx.strokeStyle = 'rgba(0, 230, 255, 0.2)';
                 ctx.lineWidth = 2;
@@ -627,7 +623,6 @@
             }
 
             if (player.isDashing) {
-                // Triangle
                 const angle = player.facing;
                 const tipDist = r * 1.4;
                 const baseDist = r * 0.8;
@@ -666,7 +661,6 @@
                 ctx.closePath();
                 ctx.stroke();
             } else {
-                // Circle
                 ctx.shadowColor = 'rgba(0, 180, 255, 0.4)';
                 ctx.shadowBlur = 25;
                 const gradCirc = ctx.createRadialGradient(px - 6, py - 6, 5, px, py, r);
@@ -694,7 +688,6 @@
                 ctx.fill();
             }
 
-            // ---- Cooldown ring ----
             if (player.cooldownTimer > 0) {
                 const progress = player.cooldownTimer / player.dashCooldown;
                 ctx.shadowBlur = 0;
@@ -707,10 +700,9 @@
 
             ctx.shadowBlur = 0;
 
-            // ---- Draw Joystick ----
-            drawJoystick();
-
-            // ---- Draw Buttons ----
+            // ---- Draw Joysticks & Buttons ----
+            drawJoystick(aimJoystick, 'AIM');
+            drawJoystick(moveJoystick, 'MOVE');
             drawButtons();
 
             ctx.restore();
@@ -754,7 +746,6 @@
 
             // ---- Speed ring ----
             const speed = Math.hypot(player.vx, player.vy);
-            const maxSpeed = player.speed * (player.isDashing ? player.dashMultiplier : 1);
             const speedRatio = Math.min(speed / (player.speed * 1.8), 1);
             if (speedRatio > 0.05) {
                 ctx.save();
@@ -772,8 +763,7 @@
         }
 
         // ---------- DRAW JOYSTICK ----------
-        function drawJoystick() {
-            const j = moveJoystick;
+        function drawJoystick(j, label) {
             const cx = j.x,
                 cy = j.y;
             ctx.save();
@@ -815,7 +805,7 @@
             ctx.fillStyle = 'rgba(120, 180, 210, 0.4)';
             ctx.font = '10px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('MOVE', cx, cy + j.radius + 22);
+            ctx.fillText(label, cx, cy + j.radius + 22);
             ctx.restore();
         }
 
@@ -836,7 +826,7 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#ff8a65';
-            ctx.font = 'bold 18px "Segoe UI", sans-serif';
+            ctx.font = 'bold 20px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('🔫', sx, sy);
@@ -857,7 +847,7 @@
             ctx.stroke();
             ctx.shadowBlur = 0;
             ctx.fillStyle = '#4dd0e1';
-            ctx.font = 'bold 16px "Segoe UI", sans-serif';
+            ctx.font = 'bold 18px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('⚡', dx, dy);
@@ -879,7 +869,6 @@
             return (x - cx) ** 2 + (y - cy) ** 2 < radius ** 2;
         }
 
-        // Touch events
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
             const touches = e.touches;
@@ -888,8 +877,23 @@
                 const touch = touches[i];
                 const { x, y } = getCanvasCoords(touch);
 
-                // Check joystick
-                if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
+                // Aim Joystick (Left)
+                if (isInside(x, y, aimJoystick.x, aimJoystick.y, aimJoystick.radius + 20)) {
+                    if (!aimJoystick.active) {
+                        aimJoystick.active = true;
+                        aimJoystick.touchId = touch.identifier;
+                        aimJoystick.dx = x - aimJoystick.x;
+                        aimJoystick.dy = y - aimJoystick.y;
+                        const maxDist = aimJoystick.radius * 0.6;
+                        const dist = Math.hypot(aimJoystick.dx, aimJoystick.dy);
+                        if (dist > maxDist) {
+                            aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
+                            aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
+                        }
+                    }
+                }
+                // Move Joystick (Right)
+                else if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
                     if (!moveJoystick.active) {
                         moveJoystick.active = true;
                         moveJoystick.touchId = touch.identifier;
@@ -903,20 +907,18 @@
                         }
                     }
                 }
-                // Check shoot button
+                // Shoot Button
                 else if (isInside(x, y, shootButton.x, shootButton.y, shootButton.radius + 20)) {
                     shootButton.active = true;
                     shootButton.touchId = touch.identifier;
                     shoot();
                 }
-                // Check dash button
+                // Dash Button
                 else if (isInside(x, y, dashButton.x, dashButton.y, dashButton.radius + 20)) {
                     dashButton.active = true;
                     dashButton.touchId = touch.identifier;
                     performDash();
                 }
-                // If not on any button, maybe we can also shoot by tapping anywhere else?
-                // We'll ignore for now, only shoot via button.
             }
         }, { passive: false });
 
@@ -927,6 +929,17 @@
             for (let i = 0; i < touches.length; i++) {
                 const touch = touches[i];
                 const { x, y } = getCanvasCoords(touch);
+
+                if (aimJoystick.active && touch.identifier === aimJoystick.touchId) {
+                    aimJoystick.dx = x - aimJoystick.x;
+                    aimJoystick.dy = y - aimJoystick.y;
+                    const maxDist = aimJoystick.radius * 0.6;
+                    const dist = Math.hypot(aimJoystick.dx, aimJoystick.dy);
+                    if (dist > maxDist) {
+                        aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
+                        aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
+                    }
+                }
 
                 if (moveJoystick.active && touch.identifier === moveJoystick.touchId) {
                     moveJoystick.dx = x - moveJoystick.x;
@@ -944,6 +957,22 @@
         canvas.addEventListener('touchend', (e) => {
             e.preventDefault();
             const touches = e.touches;
+
+            if (aimJoystick.active) {
+                let found = false;
+                for (let i = 0; i < touches.length; i++) {
+                    if (touches[i].identifier === aimJoystick.touchId) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    aimJoystick.active = false;
+                    aimJoystick.touchId = null;
+                    aimJoystick.dx = 0;
+                    aimJoystick.dy = 0;
+                }
+            }
 
             if (moveJoystick.active) {
                 let found = false;
@@ -992,6 +1021,10 @@
 
         canvas.addEventListener('touchcancel', (e) => {
             e.preventDefault();
+            aimJoystick.active = false;
+            aimJoystick.touchId = null;
+            aimJoystick.dx = 0;
+            aimJoystick.dy = 0;
             moveJoystick.active = false;
             moveJoystick.touchId = null;
             moveJoystick.dx = 0;
@@ -1002,16 +1035,28 @@
             dashButton.touchId = null;
         }, { passive: false });
 
-        // Mouse events (desktop)
+        // Mouse events (desktop fallback)
         let mouseDown = false;
-        let mouseJoystick = false;
+        let mouseOnAim = false;
+        let mouseOnMove = false;
 
         canvas.addEventListener('mousedown', (e) => {
             const { x, y } = getCanvasCoords(e);
             mouseDown = true;
 
-            if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
-                mouseJoystick = true;
+            if (isInside(x, y, aimJoystick.x, aimJoystick.y, aimJoystick.radius + 20)) {
+                mouseOnAim = true;
+                aimJoystick.active = true;
+                aimJoystick.dx = x - aimJoystick.x;
+                aimJoystick.dy = y - aimJoystick.y;
+                const maxDist = aimJoystick.radius * 0.6;
+                const dist = Math.hypot(aimJoystick.dx, aimJoystick.dy);
+                if (dist > maxDist) {
+                    aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
+                    aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
+                }
+            } else if (isInside(x, y, moveJoystick.x, moveJoystick.y, moveJoystick.radius + 20)) {
+                mouseOnMove = true;
                 moveJoystick.active = true;
                 moveJoystick.dx = x - moveJoystick.x;
                 moveJoystick.dy = y - moveJoystick.y;
@@ -1030,7 +1075,17 @@
 
         canvas.addEventListener('mousemove', (e) => {
             const { x, y } = getCanvasCoords(e);
-            if (mouseDown && mouseJoystick && moveJoystick.active) {
+            if (mouseDown && mouseOnAim && aimJoystick.active) {
+                aimJoystick.dx = x - aimJoystick.x;
+                aimJoystick.dy = y - aimJoystick.y;
+                const maxDist = aimJoystick.radius * 0.6;
+                const dist = Math.hypot(aimJoystick.dx, aimJoystick.dy);
+                if (dist > maxDist) {
+                    aimJoystick.dx = (aimJoystick.dx / dist) * maxDist;
+                    aimJoystick.dy = (aimJoystick.dy / dist) * maxDist;
+                }
+            }
+            if (mouseDown && mouseOnMove && moveJoystick.active) {
                 moveJoystick.dx = x - moveJoystick.x;
                 moveJoystick.dy = y - moveJoystick.y;
                 const maxDist = moveJoystick.radius * 0.6;
@@ -1044,7 +1099,13 @@
 
         canvas.addEventListener('mouseup', (e) => {
             mouseDown = false;
-            mouseJoystick = false;
+            mouseOnAim = false;
+            mouseOnMove = false;
+            if (aimJoystick.active) {
+                aimJoystick.active = false;
+                aimJoystick.dx = 0;
+                aimJoystick.dy = 0;
+            }
             if (moveJoystick.active) {
                 moveJoystick.active = false;
                 moveJoystick.dx = 0;
@@ -1055,7 +1116,13 @@
         canvas.addEventListener('mouseleave', () => {
             if (mouseDown) {
                 mouseDown = false;
-                mouseJoystick = false;
+                mouseOnAim = false;
+                mouseOnMove = false;
+                if (aimJoystick.active) {
+                    aimJoystick.active = false;
+                    aimJoystick.dx = 0;
+                    aimJoystick.dy = 0;
+                }
                 if (moveJoystick.active) {
                     moveJoystick.active = false;
                     moveJoystick.dx = 0;
@@ -1067,20 +1134,20 @@
         // Keyboard fallback
         window.addEventListener('keydown', (e) => {
             const key = e.key.toLowerCase();
-            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift'].includes(key) || e.key === ' ') {
+            if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'shift', 'f', 'j'].includes(key) ||
+                e.key === ' ') {
                 e.preventDefault();
             }
             if (key === 'w' || e.key === 'ArrowUp') keys.up = true;
             if (key === 's' || e.key === 'ArrowDown') keys.down = true;
             if (key === 'a' || e.key === 'ArrowLeft') keys.left = true;
             if (key === 'd' || e.key === 'ArrowRight') keys.right = true;
-            if (key === ' ' || e.key === 'Shift') {
-                performDash();
-            }
-            // Shoot with 'f' or 'j'
-            if (key === 'f' || key === 'j') {
-                shoot();
-            }
+            if (key === ' ' || e.key === 'Shift') performDash();
+            if (key === 'f' || key === 'j') shoot();
+
+            // Mouse aim fallback: use arrow keys to aim? No, just keep it simple.
+            // If keyboard is used, we can aim with mouse or just lock to movement direction.
+            // Let's keep the left joystick for aiming even on desktop.
         });
 
         window.addEventListener('keyup', (e) => {
@@ -1122,10 +1189,11 @@
 
         requestAnimationFrame(gameLoop);
 
-        console.log('🔫 Shotgun & Dash Game');
-        console.log('🟢 Move: drag left joystick (or WASD on desktop)');
-        console.log('⚡ Dash: press dash button (or Space/Shift on desktop)');
-        console.log('🔫 Shoot: press shoot button (or F/J on desktop)');
+        console.log('🔫 Twin Stick Shotgun');
+        console.log('🟢 Move: Right Joystick (or WASD)');
+        console.log('🎯 Aim: Left Joystick (or Mouse)');
+        console.log('⚡ Dash: Top-Left Button (or Space/Shift)');
+        console.log('🔫 Shoot: Top-Right Button (or F/J)');
         console.log('💥 Damage decreases with distance!');
     </script>
 </body>
