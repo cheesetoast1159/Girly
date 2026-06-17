@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Drone Hunter</title>
+    <title>Drone Hunter - Boss Fight</title>
     <style>
         * {
             margin: 0;
@@ -120,6 +120,8 @@
             color: #6a8ba0;
             font-size: 13px;
             letter-spacing: 0.3px;
+            flex-wrap: wrap;
+            gap: 6px;
         }
 
         .hud .status {
@@ -161,12 +163,31 @@
             display: flex;
             align-items: center;
             gap: 6px;
+            flex-wrap: wrap;
         }
 
         .hud .info span {
             color: #8ac4e0;
             font-weight: 600;
             min-width: 36px;
+        }
+
+        /* Health bar */
+        .health-bar-container {
+            width: 100%;
+            height: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            margin-top: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .health-bar {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #00e676, #4dd0e1);
+            border-radius: 8px;
+            transition: width 0.2s;
         }
 
         @media (max-width: 600px) {
@@ -176,8 +197,14 @@
             }
             .hud {
                 font-size: 11px;
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .hud .status {
                 flex-wrap: wrap;
-                gap: 6px;
+                justify-content: center;
+            }
+            .hud .info {
                 justify-content: center;
             }
             #menuOverlay h1 {
@@ -201,11 +228,11 @@
             <div class="menu-buttons">
                 <div class="menu-btn" data-weapon="shotgun">
                     🔫 SHOTGUN
-                    <span class="sub">spread shot · damage falloff</span>
+                    <span class="sub">spread · damage falloff</span>
                 </div>
                 <div class="menu-btn" data-weapon="sniper">
                     🎯 SNIPER
-                    <span class="sub">high caliber · blue beam trail</span>
+                    <span class="sub">piercing · lightning tail</span>
                 </div>
             </div>
         </div>
@@ -224,13 +251,22 @@
                     <span style="color:#4a7a8a;">ENEMIES</span>
                     <span id="enemyCount" style="color:#ff8a65; font-weight:600;">0</span>
                 </div>
+                <div class="indicator">
+                    <span style="color:#4a7a8a;">KILLS</span>
+                    <span id="killCount" style="color:#ffd54f; font-weight:600;">0</span>
+                </div>
             </div>
             <div class="info">
                 <span style="color:#4a7a8a;">🔫</span>
                 <span id="ammoStatus" style="color:#8ac4e0;">READY</span>
                 <span style="color:#4a7a8a; margin-left:10px;">WEAPON:</span>
                 <span id="weaponLabel" style="color:#8ac4e0; font-weight:600;">SHOTGUN</span>
+                <span style="color:#4a7a8a; margin-left:10px;">HP:</span>
+                <span id="healthDisplay" style="color:#ff8a65; font-weight:600;">5/5</span>
             </div>
+        </div>
+        <div class="health-bar-container">
+            <div class="health-bar" id="healthBar" style="width:100%;"></div>
         </div>
     </div>
 
@@ -241,7 +277,10 @@
         const speedDisplay = document.getElementById('speedDisplay');
         const ammoStatus = document.getElementById('ammoStatus');
         const enemyCount = document.getElementById('enemyCount');
+        const killCountDisplay = document.getElementById('killCount');
         const weaponLabel = document.getElementById('weaponLabel');
+        const healthDisplay = document.getElementById('healthDisplay');
+        const healthBar = document.getElementById('healthBar');
         const menuOverlay = document.getElementById('menuOverlay');
 
         const W = 900,
@@ -274,8 +313,10 @@
             trail: [],
             maxTrail: 30,
             flashTimer: 0,
-            health: 5,
-            maxHealth: 5,
+
+            health: 10,
+            maxHealth: 10,
+            lifeSteal: 0.5, // 50%
         };
 
         // ---------- WEAPON CONFIGS ----------
@@ -293,10 +334,11 @@
                 cooldownDuration: 500,
                 pelletCount: 1,
                 spread: 0.02,
-                pelletSpeed: 18,
-                maxRange: 750,
+                pelletSpeed: 20,
+                maxRange: 800,
                 damageBase: 10,
                 effects: { shake: 14, flashCount: 40 },
+                piercing: true,
             }
         };
 
@@ -320,6 +362,20 @@
         // ---------- ENEMIES ----------
         let enemies = [];
         let enemyProjectiles = [];
+
+        // ---------- BOSS ----------
+        let boss = null;
+        let bossSpawned = false;
+        let killCount = 0;
+        const KILLS_TO_SPAWN_BOSS = 15;
+
+        // ---------- SPECIAL ATTACK ----------
+        let targetCircle = null; // { x, y, timer, phase, radius }
+        let circleDrones = []; // drones that circle the target
+        let specialAttackCooldown = 0;
+        const SPECIAL_ATTACK_COOLDOWN = 18000; // 18 seconds
+        let specialAttackPhase = 0; // 0=idle, 1=buildup, 2=circle follows, 3=drones circle
+        let specialAttackTimer = 0;
 
         // ---------- JOYSTICKS ----------
         const aimJoystick = {
@@ -453,33 +509,31 @@
             }
         }
 
-        // ---------- EXPLOSION (for suicide missile) ----------
-        function spawnExplosion(x, y) {
-            // Fireball
-            for (let i = 0; i < 50; i++) {
-                const speed = 3 + Math.random() * 9;
+        function spawnExplosion(x, y, big = false) {
+            const count = big ? 80 : 50;
+            for (let i = 0; i < count; i++) {
+                const speed = (2 + Math.random() * 8) * (big ? 1.5 : 1);
                 const a = Math.random() * Math.PI * 2;
-                const size = 3 + Math.random() * 9;
+                const size = (3 + Math.random() * 9) * (big ? 1.5 : 1);
                 particles.push({
-                    x: x + (Math.random() - 0.5) * 12,
-                    y: y + (Math.random() - 0.5) * 12,
+                    x: x + (Math.random() - 0.5) * 14,
+                    y: y + (Math.random() - 0.5) * 14,
                     vx: Math.cos(a) * speed * (0.5 + Math.random() * 0.6),
                     vy: Math.sin(a) * speed * (0.5 + Math.random() * 0.6),
                     life: 1,
-                    decay: 0.005 + Math.random() * 0.012,
+                    decay: 0.004 + Math.random() * 0.01,
                     size: size,
                     maxSize: size,
                     color: `hsl(${25 + Math.random() * 35}, 100%, ${45 + Math.random() * 35}%)`,
                 });
             }
-            // Smoke / debris
-            for (let i = 0; i < 25; i++) {
+            for (let i = 0; i < (big ? 40 : 25); i++) {
                 const speed = 1 + Math.random() * 4;
                 const a = Math.random() * Math.PI * 2;
                 const size = 2 + Math.random() * 6;
                 particles.push({
-                    x: x + (Math.random() - 0.5) * 8,
-                    y: y + (Math.random() - 0.5) * 8,
+                    x: x + (Math.random() - 0.5) * 10,
+                    y: y + (Math.random() - 0.5) * 10,
                     vx: Math.cos(a) * speed * 0.4,
                     vy: Math.sin(a) * speed * 0.4 - 1.5,
                     life: 1,
@@ -489,25 +543,28 @@
                     color: `hsl(0, 0%, ${20 + Math.random() * 30}%)`,
                 });
             }
-            // Red/orange core
-            for (let i = 0; i < 20; i++) {
-                const speed = 1 + Math.random() * 3;
-                const a = Math.random() * Math.PI * 2;
+            window.shakeAmount = big ? 16 : 10;
+            window.shakeTimer = big ? 300 : 200;
+        }
+
+        // lightning tail particles for sniper
+        function spawnLightningTail(x, y, angle, count = 15) {
+            for (let i = 0; i < count; i++) {
+                const speed = 2 + Math.random() * 6;
+                const a = angle + (Math.random() - 0.5) * 0.8;
+                const size = 1.5 + Math.random() * 4;
                 particles.push({
                     x: x + (Math.random() - 0.5) * 6,
                     y: y + (Math.random() - 0.5) * 6,
-                    vx: Math.cos(a) * speed * 0.6,
-                    vy: Math.sin(a) * speed * 0.6 - 0.5,
+                    vx: Math.cos(a) * speed * 0.3,
+                    vy: Math.sin(a) * speed * 0.3,
                     life: 1,
-                    decay: 0.01 + Math.random() * 0.02,
-                    size: 4 + Math.random() * 8,
-                    maxSize: 10,
-                    color: `hsl(${5 + Math.random() * 20}, 100%, ${50 + Math.random() * 30}%)`,
+                    decay: 0.02 + Math.random() * 0.04,
+                    size: size,
+                    maxSize: size,
+                    color: `hsl(210, 100%, 70%)`,
                 });
             }
-            // Screen shake
-            window.shakeAmount = 12;
-            window.shakeTimer = 200;
         }
 
         // ---------- DASH ----------
@@ -543,7 +600,6 @@
 
             spawnMuzzleFlash(player.x, player.y, angle, flashCount, isSniper);
 
-            // Store beam start position for sniper
             let beamStartX = player.x;
             let beamStartY = player.y;
 
@@ -564,10 +620,10 @@
                     originY: originY,
                     damage: shotgun.damageBase,
                     isSniper: isSniper,
+                    piercing: isSniper, // sniper piercing
                 };
                 bullets.push(bullet);
 
-                // If sniper, create a beam for this bullet
                 if (isSniper) {
                     beams.push({
                         startX: beamStartX,
@@ -579,6 +635,10 @@
                         bulletRef: bullet,
                         age: 0,
                     });
+                    // Spawn lightning tail particles
+                    for (let j = 0; j < 5; j++) {
+                        spawnLightningTail(originX, originY, angle, 8);
+                    }
                 }
             }
 
@@ -595,7 +655,7 @@
         }
 
         // ---------- ENEMY SPAWN ----------
-        function spawnEnemy() {
+        function spawnEnemy(type = null) {
             let x, y;
             const side = Math.floor(Math.random() * 4);
             const margin = 50;
@@ -606,18 +666,18 @@
                 y = H - margin; } else { x = margin;
                 y = margin + Math.random() * (H - 2 * margin); }
 
-            const missileCount = enemies.filter(e => e.type === 'missile').length;
-            let type = 'drone';
-            if (missileCount < 2 && Math.random() < 0.55) {
-                type = 'missile';
-            } else if (enemies.length < 3) {
-                type = 'drone';
-            } else {
-                type = Math.random() < 0.5 ? 'drone' : 'missile';
+            let isMissile = false;
+            let isDrone = true;
+            if (type === 'missile') isMissile = true;
+            else if (type === 'drone') isDrone = true;
+            else {
+                // random
+                const missileCount = enemies.filter(e => e.type === 'missile').length;
+                if (missileCount < 2 && Math.random() < 0.5) isMissile = true;
+                else isDrone = true;
             }
 
-            const isMissile = type === 'missile';
-            enemies.push({
+            const enemy = {
                 x: x,
                 y: y,
                 radius: 16,
@@ -628,13 +688,330 @@
                 shootTimer: 0,
                 shootInterval: 3000,
                 angle: 0,
-                type: type,
+                type: isMissile ? 'missile' : 'drone',
                 preferredDistance: isMissile ? 30 : 250,
                 distanceDeadZone: 20,
                 dodgeCooldown: 0,
-                // for missile: explosion radius
                 explosionRadius: 60,
-            });
+                // for bound drones
+                boundToBoss: false,
+                releaseTime: 0,
+                isBound: false,
+            };
+            enemies.push(enemy);
+            return enemy;
+        }
+
+        // ---------- BOSS FUNCTIONS ----------
+        function spawnBoss() {
+            boss = {
+                x: W / 2,
+                y: H / 2,
+                radius: 40,
+                health: 50,
+                maxHealth: 50,
+                speed: 1.2,
+                vx: 0,
+                vy: 0,
+                angle: 0,
+                summonTimer: 0,
+                summonInterval: 6000,
+                specialCooldown: 0,
+                specialInterval: 18000,
+                phase: 0, // 0=idle, 1=summoning, 2=special
+                boundDrones: [], // references to enemies that are bound
+                alive: true,
+                flashTimer: 0,
+            };
+            bossSpawned = true;
+            // dramatic entrance: big flash and particles
+            window.sniperFlash = 1.0;
+            window.sniperFlashTimer = 400;
+            spawnExplosion(boss.x, boss.y, true);
+            window.shakeAmount = 20;
+            window.shakeTimer = 400;
+        }
+
+        function bossSummonDrones() {
+            if (!boss || !boss.alive) return;
+            // spawn 2 drones that are bound to boss
+            for (let i = 0; i < 2; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 60 + Math.random() * 30;
+                const dx = Math.cos(angle) * dist;
+                const dy = Math.sin(angle) * dist;
+                const drone = spawnEnemy('drone');
+                drone.x = boss.x + dx;
+                drone.y = boss.y + dy;
+                drone.boundToBoss = true;
+                drone.isBound = true;
+                drone.releaseTime = 6000; // will be released after 6 seconds
+                // give them slightly different behavior
+                drone.speed = 1.2;
+                drone.health = 3;
+                // store reference in boss
+                if (!boss.boundDrones) boss.boundDrones = [];
+                boss.boundDrones.push(drone);
+            }
+        }
+
+        function bossReleaseDrones() {
+            if (!boss || !boss.boundDrones) return;
+            for (const drone of boss.boundDrones) {
+                if (drone && drone.isBound) {
+                    drone.isBound = false;
+                    drone.boundToBoss = false;
+                    drone.speed = 0.8;
+                    drone.preferredDistance = 250;
+                    drone.distanceDeadZone = 20;
+                    // make them normal drones
+                }
+            }
+            boss.boundDrones = [];
+        }
+
+        function bossStartSpecial() {
+            if (!boss || !boss.alive) return;
+            if (specialAttackPhase !== 0) return;
+
+            specialAttackPhase = 1; // buildup
+            specialAttackTimer = 0;
+            // particles buildup
+            for (let i = 0; i < 30; i++) {
+                const a = Math.random() * Math.PI * 2;
+                const speed = 2 + Math.random() * 5;
+                particles.push({
+                    x: boss.x + (Math.random() - 0.5) * 30,
+                    y: boss.y + (Math.random() - 0.5) * 30,
+                    vx: Math.cos(a) * speed,
+                    vy: Math.sin(a) * speed,
+                    life: 1,
+                    decay: 0.01 + Math.random() * 0.02,
+                    size: 2 + Math.random() * 6,
+                    maxSize: 8,
+                    color: `hsl(0, 100%, 60%)`,
+                });
+            }
+            window.shakeAmount = 4;
+            window.shakeTimer = 200;
+        }
+
+        function updateBoss(dt) {
+            if (!boss || !boss.alive) return;
+            const dtFactor = dt / 16.67;
+
+            // Move boss toward player slowly
+            const dx = player.x - boss.x;
+            const dy = player.y - boss.y;
+            const d = Math.hypot(dx, dy);
+            if (d > 50) {
+                const angle = Math.atan2(dy, dx);
+                boss.vx += (Math.cos(angle) * boss.speed - boss.vx) * 0.02 * dtFactor;
+                boss.vy += (Math.sin(angle) * boss.speed - boss.vy) * 0.02 * dtFactor;
+            } else {
+                boss.vx *= 0.95;
+                boss.vy *= 0.95;
+            }
+            boss.x += boss.vx * dtFactor;
+            boss.y += boss.vy * dtFactor;
+            boss.x = clamp(boss.x, boss.radius, W - boss.radius);
+            boss.y = clamp(boss.y, boss.radius, H - boss.radius);
+
+            // Update bound drones to follow boss
+            if (boss.boundDrones) {
+                for (const drone of boss.boundDrones) {
+                    if (drone && drone.isBound) {
+                        const angle = Math.atan2(boss.y - drone.y, boss.x - drone.x);
+                        const dist = 60;
+                        const targetX = boss.x - Math.cos(angle) * dist;
+                        const targetY = boss.y - Math.sin(angle) * dist;
+                        drone.vx += (targetX - drone.x) * 0.05 * dtFactor;
+                        drone.vy += (targetY - drone.y) * 0.05 * dtFactor;
+                        drone.x += drone.vx * dtFactor;
+                        drone.y += drone.vy * dtFactor;
+                        drone.x = clamp(drone.x, drone.radius, W - drone.radius);
+                        drone.y = clamp(drone.y, drone.radius, H - drone.radius);
+                    }
+                }
+                // Remove dead bound drones from list
+                boss.boundDrones = boss.boundDrones.filter(d => d && d.health > 0 && d.isBound);
+            }
+
+            // Summon timer
+            boss.summonTimer += dt;
+            if (boss.summonTimer >= boss.summonInterval) {
+                boss.summonTimer = 0;
+                // Release current bound drones (if any) and summon new ones
+                bossReleaseDrones();
+                bossSummonDrones();
+            }
+
+            // Special attack cooldown
+            boss.specialCooldown += dt;
+            if (boss.specialCooldown >= boss.specialInterval && specialAttackPhase === 0) {
+                boss.specialCooldown = 0;
+                bossStartSpecial();
+            }
+
+            // Update special attack phases
+            if (specialAttackPhase === 1) {
+                specialAttackTimer += dt;
+                // buildup for 1 second
+                if (specialAttackTimer > 1000) {
+                    specialAttackPhase = 2;
+                    specialAttackTimer = 0;
+                    // create target circle
+                    targetCircle = {
+                        x: player.x,
+                        y: player.y,
+                        radius: 40,
+                        timer: 0,
+                        duration: 2000,
+                        phase: 'follow'
+                    };
+                    // emit particles
+                    for (let i = 0; i < 40; i++) {
+                        const a = Math.random() * Math.PI * 2;
+                        const speed = 1 + Math.random() * 3;
+                        particles.push({
+                            x: targetCircle.x + (Math.random() - 0.5) * 20,
+                            y: targetCircle.y + (Math.random() - 0.5) * 20,
+                            vx: Math.cos(a) * speed,
+                            vy: Math.sin(a) * speed,
+                            life: 1,
+                            decay: 0.01 + Math.random() * 0.02,
+                            size: 2 + Math.random() * 5,
+                            maxSize: 7,
+                            color: `hsl(0, 100%, 70%)`,
+                        });
+                    }
+                    window.shakeAmount = 6;
+                    window.shakeTimer = 150;
+                }
+            } else if (specialAttackPhase === 2) {
+                targetCircle.timer += dt;
+                // target circle follows player
+                targetCircle.x += (player.x - targetCircle.x) * 0.05 * dtFactor;
+                targetCircle.y += (player.y - targetCircle.y) * 0.05 * dtFactor;
+                // emit red particles
+                if (Math.random() < 0.3) {
+                    const a = Math.random() * Math.PI * 2;
+                    const speed = 1 + Math.random() * 2;
+                    particles.push({
+                        x: targetCircle.x + Math.cos(a) * targetCircle.radius,
+                        y: targetCircle.y + Math.sin(a) * targetCircle.radius,
+                        vx: Math.cos(a) * speed * 0.5,
+                        vy: Math.sin(a) * speed * 0.5,
+                        life: 1,
+                        decay: 0.02 + Math.random() * 0.03,
+                        size: 2 + Math.random() * 4,
+                        maxSize: 5,
+                        color: `hsl(0, 100%, 60%)`,
+                    });
+                }
+                if (targetCircle.timer > targetCircle.duration) {
+                    // spawn wave of drones
+                    specialAttackPhase = 3;
+                    specialAttackTimer = 0;
+                    // create 7 drones that will circle the target
+                    const count = 7;
+                    const radius = 120;
+                    for (let i = 0; i < count; i++) {
+                        const angle = (i / count) * Math.PI * 2;
+                        const drone = {
+                            x: targetCircle.x + Math.cos(angle) * radius,
+                            y: targetCircle.y + Math.sin(angle) * radius,
+                            radius: 12,
+                            angle: angle,
+                            orbitRadius: radius,
+                            speed: 4.5, // rad/s
+                            life: 1,
+                            targetX: targetCircle.x,
+                            targetY: targetCircle.y,
+                            type: 'circle_drone',
+                            health: 2,
+                            // we'll handle separately
+                        };
+                        circleDrones.push(drone);
+                    }
+                    // also spawn particles
+                    for (let i = 0; i < 30; i++) {
+                        const a = Math.random() * Math.PI * 2;
+                        const speed = 2 + Math.random() * 4;
+                        particles.push({
+                            x: targetCircle.x + (Math.random() - 0.5) * 40,
+                            y: targetCircle.y + (Math.random() - 0.5) * 40,
+                            vx: Math.cos(a) * speed,
+                            vy: Math.sin(a) * speed,
+                            life: 1,
+                            decay: 0.01 + Math.random() * 0.02,
+                            size: 3 + Math.random() * 6,
+                            maxSize: 8,
+                            color: `hsl(0, 100%, 70%)`,
+                        });
+                    }
+                    window.shakeAmount = 10;
+                    window.shakeTimer = 200;
+                    // remove target circle after a moment
+                    setTimeout(() => { targetCircle = null; }, 500);
+                }
+            } else if (specialAttackPhase === 3) {
+                // update circle drones
+                const speed = 4.5; // radians per second
+                const rounds = 2;
+                const totalTime = (rounds * 2 * Math.PI) / speed; // time to complete 2 rounds
+                specialAttackTimer += dt;
+                const progress = specialAttackTimer / totalTime;
+                // update each drone's orbit
+                for (const drone of circleDrones) {
+                    drone.angle += speed * dtFactor * 0.001;
+                    // maintain orbit around target (targetCircle might be gone, use last known position)
+                    const cx = targetCircle ? targetCircle.x : drone.targetX;
+                    const cy = targetCircle ? targetCircle.y : drone.targetY;
+                    drone.targetX = cx;
+                    drone.targetY = cy;
+                    drone.x = cx + Math.cos(drone.angle) * drone.orbitRadius;
+                    drone.y = cy + Math.sin(drone.angle) * drone.orbitRadius;
+                    // emit trail
+                    if (Math.random() < 0.3) {
+                        particles.push({
+                            x: drone.x + (Math.random() - 0.5) * 6,
+                            y: drone.y + (Math.random() - 0.5) * 6,
+                            vx: (Math.random() - 0.5) * 0.5,
+                            vy: (Math.random() - 0.5) * 0.5,
+                            life: 1,
+                            decay: 0.02 + Math.random() * 0.03,
+                            size: 2 + Math.random() * 3,
+                            maxSize: 4,
+                            color: `hsl(0, 100%, 60%)`,
+                        });
+                    }
+                }
+                // after 2 rounds, remove drones and end phase
+                if (specialAttackTimer > totalTime) {
+                    // remove circle drones
+                    circleDrones = [];
+                    specialAttackPhase = 0;
+                    targetCircle = null;
+                    // cooldown reset
+                    boss.specialCooldown = 0;
+                }
+            }
+
+            // Flash timer
+            if (boss.flashTimer > 0) boss.flashTimer -= dt;
+
+            // Boss health <= 0 -> death
+            if (boss.health <= 0) {
+                boss.alive = false;
+                spawnExplosion(boss.x, boss.y, true);
+                window.shakeAmount = 20;
+                window.shakeTimer = 400;
+                // remove boss from game
+                boss = null;
+                bossSpawned = false;
+                // maybe spawn a reward? not needed.
+            }
         }
 
         // ---------- UPDATE ----------
@@ -765,7 +1142,7 @@
                 if (shotgun.cooldown < 0) shotgun.cooldown = 0;
             }
 
-            // ---- Player Bullets ----
+            // ---- Player Bullets (with piercing) ----
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.x += b.vx * dtFactor;
@@ -781,13 +1158,12 @@
                 }
             }
 
-            // ---- BEAMS: update to follow bullets ----
+            // ---- BEAMS ----
             for (let i = beams.length - 1; i >= 0; i--) {
                 const beam = beams[i];
                 beam.age += dt;
 
                 if (beam.bulletRef && beam.active) {
-                    // Check if bullet still exists
                     let bulletExists = false;
                     for (const b of bullets) {
                         if (b === beam.bulletRef) {
@@ -803,7 +1179,6 @@
                         beam.active = false;
                     }
                 } else {
-                    // Fade out
                     beam.life -= 0.015 * dtFactor;
                     if (beam.life <= 0) {
                         beams.splice(i, 1);
@@ -811,30 +1186,28 @@
                     }
                 }
 
-                // Update start position to follow player (smoothly)
                 beam.startX += (player.x - beam.startX) * 0.1 * dtFactor;
                 beam.startY += (player.y - beam.startY) * 0.1 * dtFactor;
             }
 
-            // ---- Enemy AI ----
+            // ---- ENEMY AI ----
             for (let i = enemies.length - 1; i >= 0; i--) {
                 const e = enemies[i];
+                if (e.isBound) {
+                    // handled in boss update
+                    continue;
+                }
                 const dx = player.x - e.x;
                 const dy = player.y - e.y;
                 const d = Math.hypot(dx, dy);
 
-                // ---- SUICIDE MISSILE: check for impact explosion ----
                 if (e.type === 'missile') {
                     const distToPlayer = dist(e.x, e.y, player.x, player.y);
                     if (distToPlayer < e.radius + player.radius + 12) {
-                        // EXPLODE!
-                        spawnExplosion(e.x, e.y);
+                        spawnExplosion(e.x, e.y, false);
                         window.shakeAmount = 12;
                         window.shakeTimer = 200;
-                        player.flashTimer = 180;
-                        // Damage player (flash only for now, health system simple)
                         player.flashTimer = 200;
-                        // Remove missile
                         spawnEnemyDeath(e.x, e.y, 'hsl(30, 100%, 50%)');
                         enemies.splice(i, 1);
                         continue;
@@ -846,7 +1219,6 @@
                     let speedFactor = 0;
 
                     if (e.type === 'missile') {
-                        // Missile: always move toward player, dodge bullets
                         let dodgeX = 0,
                             dodgeY = 0;
                         for (const b of bullets) {
@@ -880,7 +1252,7 @@
                             e.vy += (Math.sin(angle) * speed - e.vy) * 0.09 * dtFactor;
                         }
                     } else {
-                        // Drone: maintain distance
+                        // drone
                         const pref = e.preferredDistance;
                         const dead = e.distanceDeadZone;
                         if (d > pref + dead) speedFactor = 0.6;
@@ -897,8 +1269,7 @@
                 e.x = clamp(e.x, e.radius, W - e.radius);
                 e.y = clamp(e.y, e.radius, H - e.radius);
 
-                // Drone shoots
-                if (e.type === 'drone') {
+                if (e.type === 'drone' && !e.isBound) {
                     e.shootTimer += dt;
                     if (e.shootTimer >= e.shootInterval) {
                         e.shootTimer = 0;
@@ -949,15 +1320,20 @@
                 }
             }
 
-            // ---- Bullet vs Enemy Collision ----
+            // ---- Bullet vs Enemy Collision (with piercing) ----
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 let bulletUsed = false;
                 for (let j = enemies.length - 1; j >= 0; j--) {
                     const e = enemies[j];
                     if (dist(b.x, b.y, e.x, e.y) < e.radius + 4) {
-                        e.health -= b.damage;
-                        bulletUsed = true;
+                        // Deal damage
+                        const damageDealt = b.damage;
+                        e.health -= damageDealt;
+                        // Life steal for player
+                        const healAmount = damageDealt * player.lifeSteal;
+                        player.health = Math.min(player.maxHealth, player.health + healAmount);
+                        // Visual hit particles
                         for (let k = 0; k < 4; k++) {
                             const a = Math.random() * Math.PI * 2;
                             const speed = 1 + Math.random() * 2;
@@ -977,19 +1353,42 @@
                             const color = e.type === 'missile' ? 'hsl(30, 100%, 50%)' : 'hsl(0, 80%, 50%)';
                             spawnEnemyDeath(e.x, e.y, color);
                             enemies.splice(j, 1);
+                            killCount++;
+                            killCountDisplay.textContent = killCount;
+                            // Check for boss spawn
+                            if (!bossSpawned && killCount >= KILLS_TO_SPAWN_BOSS) {
+                                spawnBoss();
+                            }
                         }
-                        break;
+                        // If piercing, continue to next enemy (don't remove bullet)
+                        if (!b.piercing) {
+                            bulletUsed = true;
+                            break;
+                        } else {
+                            // piercing: reduce damage for next enemy? We'll keep same damage for simplicity
+                            // but we need to not break; we can continue loop
+                            // but we still want to mark that we hit something
+                            // we'll not set bulletUsed to true, so bullet remains.
+                            // However we might want to reduce damage for each pierce? Let's keep it.
+                        }
                     }
                 }
-                if (bulletUsed) {
+                if (!b.piercing && bulletUsed) {
                     bullets.splice(i, 1);
                 }
+                // if piercing, we never remove bullet here; it will be removed when out of range
             }
 
-            // ---- Spawn new enemies ----
-            const maxEnemies = 4;
-            while (enemies.length < maxEnemies) {
+            // ---- Spawn normal enemies (if boss not spawned or boss alive but we want some) ----
+            const maxEnemies = bossSpawned ? 2 : 4; // fewer when boss is present
+            const normalEnemies = enemies.filter(e => !e.isBound);
+            while (normalEnemies.length < maxEnemies) {
                 spawnEnemy();
+            }
+
+            // ---- Update Boss ----
+            if (bossSpawned) {
+                updateBoss(dt);
             }
 
             // ---- Particles ----
@@ -1022,13 +1421,17 @@
             // ---- UI ----
             const speed = Math.hypot(player.vx, player.vy);
             speedDisplay.textContent = Math.round(speed * 10) / 10;
-            enemyCount.textContent = enemies.length;
+            enemyCount.textContent = enemies.length + (bossSpawned ? 1 : 0);
 
             if (player.isDashing) dashDot.className = 'dot dashing';
             else if (player.cooldownTimer > 0) dashDot.className = 'dot cooldown';
             else dashDot.className = 'dot ready';
 
             if (player.flashTimer > 0) player.flashTimer -= dt;
+
+            // Update health display
+            healthDisplay.textContent = `${Math.round(player.health * 10) / 10}/${player.maxHealth}`;
+            healthBar.style.width = `${(player.health / player.maxHealth) * 100}%`;
         }
 
         // ---------- RENDER ----------
@@ -1084,7 +1487,7 @@
             ctx.globalAlpha = 1;
             ctx.shadowBlur = 0;
 
-            // ---- BEAMS (Sniper Blue Trail) ----
+            // ---- BEAMS ----
             for (const beam of beams) {
                 if (beam.life < 0.01) continue;
                 const alpha = beam.life * 0.85;
@@ -1110,7 +1513,7 @@
                 ctx.lineTo(beam.endX, beam.endY);
                 ctx.stroke();
 
-                // Additional glow dots along the beam
+                // Lightning tail dots along the beam
                 ctx.shadowBlur = 40;
                 for (let t = 0.1; t < 1; t += 0.1) {
                     const bx = beam.startX + (beam.endX - beam.startX) * t;
@@ -1120,7 +1523,6 @@
                     ctx.arc(bx, by, 3 * beam.life * (1 - t) + 1, 0, Math.PI * 2);
                     ctx.fill();
                 }
-
                 ctx.restore();
             }
             ctx.shadowBlur = 0;
@@ -1145,6 +1547,24 @@
                     ctx.beginPath();
                     ctx.arc(b.x, b.y, size * 3.5, 0, Math.PI * 2);
                     ctx.fill();
+                    // Lightning tail (extra)
+                    for (let j = 0; j < 3; j++) {
+                        const a = b.vx / Math.hypot(b.vx, b.vy);
+                        const off = (Math.random() - 0.5) * 0.5;
+                        const px = b.x - Math.cos(Math.atan2(b.vy, b.vx) + off) * 8;
+                        const py = b.y - Math.sin(Math.atan2(b.vy, b.vx) + off) * 8;
+                        particles.push({
+                            x: px,
+                            y: py,
+                            vx: (Math.random() - 0.5) * 0.3,
+                            vy: (Math.random() - 0.5) * 0.3,
+                            life: 0.6 + Math.random() * 0.3,
+                            decay: 0.02 + Math.random() * 0.03,
+                            size: 1 + Math.random() * 3,
+                            maxSize: 4,
+                            color: `hsl(210, 100%, 70%)`,
+                        });
+                    }
                 }
             }
             ctx.globalAlpha = 1;
@@ -1174,9 +1594,11 @@
                 ctx.rotate(angle);
                 const size = e.radius;
                 const isMissile = e.type === 'missile';
-                const fillColor = '#000000';
-                const strokeColor = isMissile ? '#ff9100' : '#ff1744';
-                const glowColor = isMissile ? 'rgba(255, 145, 0, 0.8)' : 'rgba(255, 23, 68, 0.8)';
+                const isBound = e.isBound || false;
+                const fillColor = isBound ? '#1a1a2e' : '#000000';
+                const strokeColor = isMissile ? '#ff9100' : (isBound ? '#4dd0e1' : '#ff1744');
+                const glowColor = isMissile ? 'rgba(255, 145, 0, 0.8)' : (isBound ? 'rgba(77, 208, 225, 0.8)' :
+                    'rgba(255, 23, 68, 0.8)');
                 ctx.shadowColor = glowColor;
                 ctx.shadowBlur = 20;
                 ctx.fillStyle = fillColor;
@@ -1199,14 +1621,103 @@
                 ctx.fillStyle = healthPercent > 0.3 ? '#4caf50' : '#ff5252';
                 ctx.fillRect(-size, -size - 10, size * 2 * healthPercent, 4);
 
-                // Missile indicator: small explosion icon
                 if (isMissile) {
                     ctx.fillStyle = 'rgba(255, 145, 0, 0.5)';
                     ctx.font = '8px sans-serif';
                     ctx.textAlign = 'center';
                     ctx.fillText('💥', 0, size + 16);
                 }
+                if (isBound) {
+                    ctx.fillStyle = 'rgba(77, 208, 225, 0.5)';
+                    ctx.font = '8px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('🔗', 0, size + 16);
+                }
+                ctx.restore();
+            }
 
+            // ---- Circle Drones (special attack) ----
+            for (const d of circleDrones) {
+                ctx.save();
+                ctx.translate(d.x, d.y);
+                const size = d.radius;
+                ctx.shadowColor = 'rgba(255, 0, 0, 0.8)';
+                ctx.shadowBlur = 20;
+                ctx.fillStyle = '#1a0000';
+                ctx.beginPath();
+                ctx.moveTo(size, 0);
+                ctx.lineTo(-size * 0.4, -size * 0.5);
+                ctx.lineTo(-size * 0.2, 0);
+                ctx.lineTo(-size * 0.4, size * 0.5);
+                ctx.closePath();
+                ctx.fill();
+                ctx.shadowBlur = 25;
+                ctx.strokeStyle = '#ff1744';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // ---- Target Circle ----
+            if (targetCircle) {
+                ctx.save();
+                ctx.shadowColor = 'rgba(255, 0, 0, 0.5)';
+                ctx.shadowBlur = 30;
+                ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 8]);
+                ctx.beginPath();
+                ctx.arc(targetCircle.x, targetCircle.y, targetCircle.radius, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                // inner glow
+                ctx.shadowBlur = 50;
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+                ctx.beginPath();
+                ctx.arc(targetCircle.x, targetCircle.y, targetCircle.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // ---- Boss ----
+            if (boss && boss.alive) {
+                ctx.save();
+                ctx.translate(boss.x, boss.y);
+                const size = boss.radius;
+                // Glow
+                ctx.shadowColor = 'rgba(255, 215, 0, 0.8)';
+                ctx.shadowBlur = 50;
+                // Body: large diamond
+                ctx.fillStyle = '#2a2a3a';
+                ctx.beginPath();
+                ctx.moveTo(0, -size);
+                ctx.lineTo(size, 0);
+                ctx.lineTo(0, size);
+                ctx.lineTo(-size, 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.shadowBlur = 30;
+                ctx.strokeStyle = '#ffd700';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                // Inner glow
+                ctx.shadowBlur = 40;
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.2)';
+                ctx.beginPath();
+                ctx.arc(0, 0, size * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                // Health bar above boss
+                ctx.shadowBlur = 0;
+                const healthPercent = boss.health / boss.maxHealth;
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(-size, -size - 20, size * 2, 6);
+                ctx.fillStyle = healthPercent > 0.3 ? '#ffd700' : '#ff5252';
+                ctx.fillRect(-size, -size - 20, size * 2 * healthPercent, 6);
+                // Label
+                ctx.fillStyle = '#ffd700';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('DRONE RHAPSODY', 0, -size - 26);
                 ctx.restore();
             }
 
@@ -1443,6 +1954,27 @@
                 ctx.arc(player.x, player.y, ringR, 0, Math.PI * 2 * speedRatio);
                 ctx.stroke();
                 ctx.setLineDash([]);
+                ctx.restore();
+            }
+
+            // ---- Boss Health Bar (if boss alive) ----
+            if (boss && boss.alive) {
+                ctx.save();
+                const bw = 200,
+                    bh = 10;
+                const bx = W / 2 - bw / 2,
+                    by = 20;
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.roundRect(bx, by, bw, bh, 4);
+                ctx.fill();
+                const healthPercent = boss.health / boss.maxHealth;
+                ctx.fillStyle = healthPercent > 0.3 ? '#ffd700' : '#ff5252';
+                ctx.roundRect(bx, by, bw * healthPercent, bh, 4);
+                ctx.fill();
+                ctx.fillStyle = '#ffd700';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('BOSS: DRONE RHAPSODY', W / 2, by - 6);
                 ctx.restore();
             }
         }
@@ -1881,9 +2413,10 @@
 
         requestAnimationFrame(gameLoop);
 
-        console.log('💥 Drone Hunter - Missile Explosion & Sniper Beam');
-        console.log('🔫 Suicide Missile: explodes on impact!');
-        console.log('🔵 Sniper: leaves a blue beam trail that fades away.');
+        console.log('💥 Drone Hunter - Boss & Piercing Sniper');
+        console.log('🔫 Sniper: piercing bullets with lightning tail and blue beam');
+        console.log('❤️ 50% life steal on damage');
+        console.log('👑 Boss: Drone Rhapsody - spawns and releases drones, special attack with target circle and circling drones.');
     </script>
 </body>
 </html>
