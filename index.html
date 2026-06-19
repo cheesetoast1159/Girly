@@ -3,18 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>NEON DRIFT - Cyberpunk Cursor</title>
+    <title>DRIFT OUT OF CONTROL - Cyberpunk Cursor</title>
     <style>
         :root {
-            --bg: #0a0a0f;
+            --bg: #050510;
         }
-
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
         body {
             background: var(--bg);
             overflow: hidden;
@@ -30,7 +28,6 @@
             height: 100%;
             font-family: 'Courier New', 'SF Mono', monospace;
         }
-
         canvas {
             display: block;
             position: absolute;
@@ -39,43 +36,69 @@
             width: 100%;
             height: 100%;
         }
-
         #instructions {
             position: absolute;
             bottom: 50%;
             left: 50%;
             transform: translate(-50%, 50%);
-            color: #00ffff;
-            font-size: clamp(14px, 3vw, 18px);
+            color: #ff00aa;
+            font-size: clamp(13px, 2.8vw, 17px);
             text-align: center;
             pointer-events: none;
             opacity: 0.9;
-            letter-spacing: 3px;
-            text-shadow: 0 0 20px #00ffff, 0 0 40px #00ffffaa;
-            transition: opacity 0.8s ease;
+            letter-spacing: 4px;
+            text-shadow: 0 0 25px #ff00aa, 0 0 50px #ff006688;
+            transition: opacity 0.6s ease;
             z-index: 10;
+            line-height: 1.6;
         }
-
         #instructions.fading {
             opacity: 0;
         }
-
+        #hud-drift {
+            position: absolute;
+            top: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ff00aa;
+            font-size: 22px;
+            letter-spacing: 6px;
+            pointer-events: none;
+            text-shadow: 0 0 20px #ff00aa, 0 0 40px #ff0066;
+            z-index: 5;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            font-weight: bold;
+        }
+        #hud-drift.active {
+            opacity: 1;
+            animation: driftPulse 0.3s ease-in-out infinite alternate;
+        }
+        @keyframes driftPulse {
+            from {
+                text-shadow: 0 0 20px #ff00aa, 0 0 40px #ff0066;
+            }
+            to {
+                text-shadow: 0 0 35px #ff44cc, 0 0 70px #ff0088, 0 0 100px #ff0044;
+            }
+        }
         #hud-speed {
             position: absolute;
             bottom: 30px;
             right: 30px;
-            color: #ff00ff;
-            font-size: 13px;
+            color: #00ffff;
+            font-size: 12px;
             letter-spacing: 2px;
             pointer-events: none;
-            text-shadow: 0 0 10px #ff00ff;
+            text-shadow: 0 0 10px #00ffff;
             z-index: 5;
         }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
-    <div id="instructions">◈ DRIFT THE NEON ◈<br><span style="font-size:0.7em;opacity:0.7;">smooth turns = more speed</span></div>
+    <div id="instructions">⚠️ DRIFT OUT OF CONTROL ⚠️<br><span style="font-size:0.65em;opacity:0.7;">the cursor has a mind of its own</span><br><span style="font-size:0.5em;opacity:0.5;">smooth arcs = speed • sharp turns = SLIDE</span></div>
+    <div id="hud-drift">◈ DRIFT ◈</div>
     <div id="hud-speed">SPD <span id="speedVal">0</span></div>
 
     <script>
@@ -83,9 +106,10 @@
             const canvas = document.getElementById('gameCanvas');
             const ctx = canvas.getContext('2d');
             const instructionsEl = document.getElementById('instructions');
+            const hudDrift = document.getElementById('hud-drift');
             const speedValEl = document.getElementById('speedVal');
 
-            // --- Canvas Setup (Retina) ---
+            // --- Canvas Setup ---
             let dpr = Math.min(window.devicePixelRatio || 1, 2);
             let W, H;
 
@@ -101,33 +125,34 @@
             }
             resizeCanvas();
             window.addEventListener('resize', resizeCanvas);
-            window.addEventListener('orientationchange', () => {
-                setTimeout(resizeCanvas, 200);
-            });
+            window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 200));
 
             // --- World ---
-            const WORLD_SIZE = 2400;
+            const WORLD_SIZE = 2800;
             const WORLD_HALF = WORLD_SIZE / 2;
-            const WALL_MARGIN = 60;
+            const WALL_MARGIN = 70;
 
-            // --- Player ---
+            // --- Player (Cursor) ---
             const player = {
                 x: WORLD_HALF,
                 y: WORLD_HALF,
                 vx: 0,
                 vy: 0,
                 speed: 0,
-                velAngle: 0, // radians, direction of actual velocity
+                velAngle: 0,
+                facingAngle: 0,
             };
 
-            const MAX_SPEED = 680; // pixels per second
-            const ACCELERATION = 1100; // pixels per second^2
-            const FRICTION = 380; // deceleration when no input
-            const BASE_ROTATION_RATE = 9.0; // radians per second (at low speed)
-            const MIN_ROTATION_FRAC = 0.22; // fraction of base rotation at max speed
+            // --- DRIFT-FOCUSED PHYSICS ---
+            const MAX_SPEED = 880;
+            const ACCELERATION = 1500;
+            const FRICTION = 42; // Extremely low - barely slows down
+            const BASE_ROTATION_RATE = 8.5;
+            const MIN_ROTATION_FRAC = 0.05; // Almost NO steering at max speed
+            const OPPOSITE_BRAKE_MULT = 3.5; // Strong braking when pushing opposite direction
 
             // --- Camera ---
-            const camera = { x: 0, y: 0, targetX: 0, targetY: 0 };
+            const camera = { x: 0, y: 0, targetX: 0, targetY: 0, zoomTarget: 1, zoom: 1 };
             camera.x = player.x - W / 2;
             camera.y = player.y - H / 2;
             camera.targetX = camera.x;
@@ -139,20 +164,20 @@
                 touchId: null,
                 baseX: 0,
                 baseY: 0,
-                baseRadius: 75,
+                baseRadius: 80,
                 knobX: 0,
                 knobY: 0,
-                knobRadius: 32,
+                knobRadius: 34,
                 angle: 0,
                 magnitude: 0,
-                fixedBaseX: 130,
+                fixedBaseX: 135,
                 fixedBaseY: 0,
             };
-            joystick.fixedBaseY = H - 140;
+            joystick.fixedBaseY = H - 145;
 
             function updateJoystickFixedBase() {
-                joystick.fixedBaseY = Math.max(H - 140, H * 0.78);
-                joystick.fixedBaseX = Math.min(130, W * 0.18);
+                joystick.fixedBaseY = Math.max(H - 145, H * 0.76);
+                joystick.fixedBaseX = Math.min(135, W * 0.17);
             }
             updateJoystickFixedBase();
 
@@ -168,75 +193,59 @@
                 return { angle, magnitude: Math.min(magnitude, 1.0) };
             }
 
-            // --- Collectibles (Data Nodes) ---
+            // --- Collectibles ---
             const collectibles = [];
-            const MAX_COLLECTIBLES = 10;
-            const COLLECTIBLE_RADIUS = 18;
+            const MAX_COLLECTIBLES = 14;
+            const COLLECTIBLE_RADIUS = 17;
 
             function spawnCollectible() {
-                const margin = 100;
-                let cx, cy;
-                let attempts = 0;
+                const margin = 120;
+                let cx, cy,
+                attempts = 0;
                 do {
                     cx = margin + Math.random() * (WORLD_SIZE - margin * 2);
                     cy = margin + Math.random() * (WORLD_SIZE - margin * 2);
                     attempts++;
-                } while (attempts < 30 &&
-                    Math.hypot(cx - player.x, cy - player.y) < 250);
-                collectibles.push({
-                    x: cx,
-                    y: cy,
-                    radius: COLLECTIBLE_RADIUS,
-                    pulse: Math.random() * Math.PI * 2,
-                    type: 'data',
-                });
+                } while (attempts < 35 && Math.hypot(cx - player.x, cy - player.y) < 280);
+                collectibles.push({ x: cx, y: cy, radius: COLLECTIBLE_RADIUS, pulse: Math.random() * Math.PI * 2,
+                    type: 'data' });
             }
 
             function initCollectibles() {
-                for (let i = 0; i < MAX_COLLECTIBLES; i++) {
-                    spawnCollectible();
-                }
+                for (let i = 0; i < MAX_COLLECTIBLES; i++) spawnCollectible();
             }
 
-            // --- Obstacles (ICE) ---
+            // --- Obstacles ---
             const obstacles = [];
-            const MAX_OBSTACLES = 7;
-            const OBSTACLE_RADIUS = 35;
+            const MAX_OBSTACLES = 12;
+            const OBSTACLE_RADIUS = 38;
 
             function spawnObstacle() {
-                const margin = 140;
-                let ox, oy;
-                let attempts = 0;
+                const margin = 160;
+                let ox, oy,
+                attempts = 0;
                 do {
                     ox = margin + Math.random() * (WORLD_SIZE - margin * 2);
                     oy = margin + Math.random() * (WORLD_SIZE - margin * 2);
                     attempts++;
-                } while (attempts < 30 &&
-                    Math.hypot(ox - player.x, oy - player.y) < 350);
-                obstacles.push({
-                    x: ox,
-                    y: oy,
-                    radius: OBSTACLE_RADIUS,
-                    pulse: Math.random() * Math.PI * 2,
-                    type: 'ice',
-                });
+                } while (attempts < 35 && Math.hypot(ox - player.x, oy - player.y) < 380);
+                obstacles.push({ x: ox, y: oy, radius: OBSTACLE_RADIUS, pulse: Math.random() * Math.PI * 2,
+                    type: 'ice' });
             }
 
             function initObstacles() {
-                for (let i = 0; i < MAX_OBSTACLES; i++) {
-                    spawnObstacle();
-                }
+                for (let i = 0; i < MAX_OBSTACLES; i++) spawnObstacle();
             }
 
             // --- Particles ---
             const particles = [];
-            const MAX_PARTICLES = 200;
+            const MAX_PARTICLES = 300;
 
-            function spawnParticles(x, y, count, color, baseSpeed, lifeRange) {
+            function spawnParticles(x, y, count, color, baseSpeed, lifeRange, sizeRange = [1.5, 4.5]) {
                 for (let i = 0; i < count; i++) {
                     if (particles.length >= MAX_PARTICLES) break;
                     const angle = Math.random() * Math.PI * 2;
-                    const speed = baseSpeed * (0.5 + Math.random());
+                    const speed = baseSpeed * (0.4 + Math.random() * 1.2);
                     particles.push({
                         x,
                         y,
@@ -245,69 +254,74 @@
                         life: lifeRange[0] + Math.random() * (lifeRange[1] - lifeRange[0]),
                         maxLife: lifeRange[1],
                         color,
-                        size: 1.5 + Math.random() * 3.5,
+                        size: sizeRange[0] + Math.random() * (sizeRange[1] - sizeRange[0]),
                     });
                 }
             }
 
-            // --- Trail Points ---
+            // --- Trail ---
             const trailPoints = [];
-            const MAX_TRAIL = 60;
+            const MAX_TRAIL = 80;
             let trailTimer = 0;
 
-            // --- Score ---
+            // --- Game State ---
             let score = 0;
             let comboCount = 0;
             let comboTimer = 0;
-            const COMBO_TIMEOUT = 1.8; // seconds
+            const COMBO_TIMEOUT = 2.2;
             let screenShake = 0;
             let hitFlash = 0;
-
-            // --- Game State ---
+            let isDrifting = false;
+            let driftIntensity = 0;
+            let driftScoreTimer = 0;
+            let nearMissCooldown = 0;
             let lastTime = performance.now();
             let instructionsOpacity = 1;
             let instructionsFading = false;
             let gameStarted = false;
 
-            // --- Input Handling ---
-            function getTouchPos(touch) {
-                return {
-                    x: touch.clientX,
-                    y: touch.clientY,
-                };
-            }
+            // --- Utility ---
+            function normalizeAngle(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
+
+            function angleDiff(a, b) { return normalizeAngle(b - a); }
+
+            function lerp(a, b, t) { return a + (b - a) * t; }
+
+            function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+            function worldToScreen(wx, wy) { return { x: wx - camera.x, y: wy - camera.y }; }
+
+            function isOnScreen(sx, sy, m = 60) { return sx > -m && sx < W + m && sy > -m && sy < H + m; }
+
+            // --- Input ---
+            function getTouchPos(t) { return { x: t.clientX, y: t.clientY }; }
 
             function isInJoystickZone(x, y) {
-                const jbx = joystick.fixedBaseX;
-                const jby = joystick.fixedBaseY;
-                const zoneRadius = joystick.baseRadius * 2.2;
-                const dx = x - jbx;
-                const dy = y - jby;
-                return Math.sqrt(dx * dx + dy * dy) < zoneRadius;
+                const jbx = joystick.fixedBaseX,
+                    jby = joystick.fixedBaseY;
+                const zr = joystick.baseRadius * 2.4;
+                return Math.hypot(x - jbx, y - jby) < zr;
             }
 
             canvas.addEventListener('touchstart', (e) => {
                 e.preventDefault();
-                if (!gameStarted) {
-                    gameStarted = true;
-                    instructionsFading = true;
-                }
-                for (const touch of e.changedTouches) {
-                    const pos = getTouchPos(touch);
-                    if (!joystick.active && isInJoystickZone(pos.x, pos.y)) {
+                if (!gameStarted) { gameStarted = true;
+                    instructionsFading = true; }
+                for (const t of e.changedTouches) {
+                    const p = getTouchPos(t);
+                    if (!joystick.active && isInJoystickZone(p.x, p.y)) {
                         joystick.active = true;
-                        joystick.touchId = touch.identifier;
+                        joystick.touchId = t.identifier;
                         joystick.baseX = joystick.fixedBaseX;
                         joystick.baseY = joystick.fixedBaseY;
-                        joystick.knobX = pos.x;
-                        joystick.knobY = pos.y;
-                        // Clamp knob
-                        const dx = joystick.knobX - joystick.baseX;
-                        const dy = joystick.knobY - joystick.baseY;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        if (dist > joystick.baseRadius) {
-                            joystick.knobX = joystick.baseX + (dx / dist) * joystick.baseRadius;
-                            joystick.knobY = joystick.baseY + (dy / dist) * joystick.baseRadius;
+                        joystick.knobX = p.x;
+                        joystick.knobY = p.y;
+                        const dx = joystick.knobX - joystick.baseX,
+                            dy = joystick.knobY - joystick.baseY;
+                        const d = Math.hypot(dx, dy);
+                        if (d > joystick.baseRadius) {
+                            joystick.knobX = joystick.baseX + (dx / d) * joystick.baseRadius;
+                            joystick.knobY = joystick.baseY + (dy / d) * joystick.baseRadius;
                         }
                     }
                 }
@@ -315,17 +329,17 @@
 
             canvas.addEventListener('touchmove', (e) => {
                 e.preventDefault();
-                for (const touch of e.changedTouches) {
-                    if (joystick.active && touch.identifier === joystick.touchId) {
-                        const pos = getTouchPos(touch);
-                        joystick.knobX = pos.x;
-                        joystick.knobY = pos.y;
-                        const dx = joystick.knobX - joystick.baseX;
-                        const dy = joystick.knobY - joystick.baseY;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        if (dist > joystick.baseRadius) {
-                            joystick.knobX = joystick.baseX + (dx / dist) * joystick.baseRadius;
-                            joystick.knobY = joystick.baseY + (dy / dist) * joystick.baseRadius;
+                for (const t of e.changedTouches) {
+                    if (joystick.active && t.identifier === joystick.touchId) {
+                        const p = getTouchPos(t);
+                        joystick.knobX = p.x;
+                        joystick.knobY = p.y;
+                        const dx = joystick.knobX - joystick.baseX,
+                            dy = joystick.knobY - joystick.baseY;
+                        const d = Math.hypot(dx, dy);
+                        if (d > joystick.baseRadius) {
+                            joystick.knobX = joystick.baseX + (dx / d) * joystick.baseRadius;
+                            joystick.knobY = joystick.baseY + (dy / d) * joystick.baseRadius;
                         }
                     }
                 }
@@ -333,8 +347,8 @@
 
             canvas.addEventListener('touchend', (e) => {
                 e.preventDefault();
-                for (const touch of e.changedTouches) {
-                    if (joystick.active && touch.identifier === joystick.touchId) {
+                for (const t of e.changedTouches) {
+                    if (joystick.active && t.identifier === joystick.touchId) {
                         joystick.active = false;
                         joystick.touchId = null;
                         joystick.knobX = joystick.baseX;
@@ -353,42 +367,40 @@
                 joystick.magnitude = 0;
             }, { passive: false });
 
-            // --- Mouse support for desktop ---
+            // Mouse support
             let mouseDown = false;
             canvas.addEventListener('mousedown', (e) => {
-                if (!gameStarted) {
-                    gameStarted = true;
-                    instructionsFading = true;
-                }
-                const pos = { x: e.clientX, y: e.clientY };
-                if (isInJoystickZone(pos.x, pos.y)) {
+                if (!gameStarted) { gameStarted = true;
+                    instructionsFading = true; }
+                const p = { x: e.clientX, y: e.clientY };
+                if (isInJoystickZone(p.x, p.y)) {
                     mouseDown = true;
                     joystick.active = true;
                     joystick.touchId = 'mouse';
                     joystick.baseX = joystick.fixedBaseX;
                     joystick.baseY = joystick.fixedBaseY;
-                    joystick.knobX = pos.x;
-                    joystick.knobY = pos.y;
-                    const dx = joystick.knobX - joystick.baseX;
-                    const dy = joystick.knobY - joystick.baseY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist > joystick.baseRadius) {
-                        joystick.knobX = joystick.baseX + (dx / dist) * joystick.baseRadius;
-                        joystick.knobY = joystick.baseY + (dy / dist) * joystick.baseRadius;
+                    joystick.knobX = p.x;
+                    joystick.knobY = p.y;
+                    const dx = joystick.knobX - joystick.baseX,
+                        dy = joystick.knobY - joystick.baseY;
+                    const d = Math.hypot(dx, dy);
+                    if (d > joystick.baseRadius) {
+                        joystick.knobX = joystick.baseX + (dx / d) * joystick.baseRadius;
+                        joystick.knobY = joystick.baseY + (dy / d) * joystick.baseRadius;
                     }
                 }
             });
             window.addEventListener('mousemove', (e) => {
                 if (mouseDown && joystick.active && joystick.touchId === 'mouse') {
-                    const pos = { x: e.clientX, y: e.clientY };
-                    joystick.knobX = pos.x;
-                    joystick.knobY = pos.y;
-                    const dx = joystick.knobX - joystick.baseX;
-                    const dy = joystick.knobY - joystick.baseY;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist > joystick.baseRadius) {
-                        joystick.knobX = joystick.baseX + (dx / dist) * joystick.baseRadius;
-                        joystick.knobY = joystick.baseY + (dy / dist) * joystick.baseRadius;
+                    const p = { x: e.clientX, y: e.clientY };
+                    joystick.knobX = p.x;
+                    joystick.knobY = p.y;
+                    const dx = joystick.knobX - joystick.baseX,
+                        dy = joystick.knobY - joystick.baseY;
+                    const d = Math.hypot(dx, dy);
+                    if (d > joystick.baseRadius) {
+                        joystick.knobX = joystick.baseX + (dx / d) * joystick.baseRadius;
+                        joystick.knobY = joystick.baseY + (dy / d) * joystick.baseRadius;
                     }
                 }
             });
@@ -403,42 +415,9 @@
                 }
             });
 
-            // --- Utility ---
-            function normalizeAngle(angle) {
-                while (angle > Math.PI) angle -= Math.PI * 2;
-                while (angle < -Math.PI) angle += Math.PI * 2;
-                return angle;
-            }
-
-            function angleDiff(a, b) {
-                return normalizeAngle(b - a);
-            }
-
-            function lerp(a, b, t) {
-                return a + (b - a) * t;
-            }
-
-            function clamp(val, min, max) {
-                return Math.max(min, Math.min(max, val));
-            }
-
-            function worldToScreen(wx, wy) {
-                return {
-                    x: wx - camera.x,
-                    y: wy - camera.y,
-                };
-            }
-
-            function isOnScreen(sx, sy, margin = 60) {
-                return sx > -margin && sx < W + margin && sy > -margin && sy < H + margin;
-            }
-
             // --- Update ---
             function update(dt) {
-                // Clamp dt
-                dt = Math.min(dt, 0.1);
-
-                // Update joystick fixed base position
+                dt = Math.min(dt, 0.12);
                 updateJoystickFixedBase();
                 if (!joystick.active) {
                     joystick.baseX = joystick.fixedBaseX;
@@ -447,208 +426,241 @@
                     joystick.knobY = joystick.baseY;
                 }
 
-                // Get joystick input
-                const joyOutput = getJoystickOutput();
-                joystick.angle = joyOutput.angle;
-                joystick.magnitude = joyOutput.magnitude;
+                const joy = getJoystickOutput();
+                joystick.angle = joy.angle;
+                joystick.magnitude = joy.magnitude;
 
-                const targetAngle = joyOutput.angle;
-                const targetMagnitude = joyOutput.magnitude;
+                const targetAngle = joy.angle;
+                const targetMag = joy.magnitude;
                 const currentSpeed = player.speed;
                 const velAngle = player.velAngle;
 
-                // Calculate angular difference
+                // Angular difference between velocity and desired direction
                 let angDiff = 0;
-                if (currentSpeed > 5 && joystick.active && targetMagnitude > 0.05) {
+                if (joystick.active && targetMag > 0.04) {
                     angDiff = angleDiff(velAngle, targetAngle);
-                } else if (joystick.active && targetMagnitude > 0.05 && currentSpeed < 5) {
-                    // When nearly stopped, snap to target direction
-                    player.velAngle = targetAngle;
-                    angDiff = 0;
                 }
-
                 const absAngDiff = Math.abs(angDiff);
 
-                // Max rotation rate depends on speed (harder to turn at high speed)
-                const speedFraction = clamp(currentSpeed / MAX_SPEED, 0, 1);
-                const maxRotationRate = BASE_ROTATION_RATE * (1 - (1 - MIN_ROTATION_FRAC) * speedFraction);
+                // --- DRIFT DETECTION ---
+                const driftThreshold = 0.55; // radians (~31°)
+                const driftSpeedMin = 220;
+                isDrifting = (joystick.active && targetMag > 0.08 && currentSpeed > driftSpeedMin && absAngDiff >
+                    driftThreshold);
+                driftIntensity = isDrifting ? clamp((absAngDiff - driftThreshold) / 1.8, 0, 1) : Math.max(0,
+                    driftIntensity - dt * 3);
 
-                // Clamp rotation
+                // --- STEERING (heavily reduced at speed) ---
+                const speedFrac = clamp(currentSpeed / MAX_SPEED, 0, 1);
+                const maxRotationRate = BASE_ROTATION_RATE * (1 - (1 - MIN_ROTATION_FRAC) * speedFrac);
                 const maxRotThisFrame = maxRotationRate * dt;
                 const actualRotation = clamp(angDiff, -maxRotThisFrame, maxRotThisFrame);
                 player.velAngle += actualRotation;
                 player.velAngle = normalizeAngle(player.velAngle);
 
-                // Target speed based on joystick magnitude
-                let targetSpeed = targetMagnitude * MAX_SPEED;
-
-                // Speed penalty for sharp turns
-                if (joystick.active && targetMagnitude > 0.05 && currentSpeed > 20) {
-                    if (absAngDiff > 2.2) { // > ~126 degrees
-                        targetSpeed *= 0.2;
-                    } else if (absAngDiff > 1.3) { // > ~74 degrees
-                        targetSpeed *= 0.45;
-                    } else if (absAngDiff > 0.7) { // > ~40 degrees
-                        targetSpeed *= 0.75;
-                    } else if (absAngDiff > 0.35) { // > ~20 degrees
-                        targetSpeed *= 0.9;
-                    }
+                // Player facing interpolates toward joystick direction (visual only)
+                if (joystick.active && targetMag > 0.04) {
+                    const faceDiff = angleDiff(player.facingAngle, targetAngle);
+                    player.facingAngle += clamp(faceDiff, -12 * dt, 12 * dt);
+                    player.facingAngle = normalizeAngle(player.facingAngle);
+                } else if (currentSpeed > 10) {
+                    const faceDiff = angleDiff(player.facingAngle, player.velAngle);
+                    player.facingAngle += clamp(faceDiff, -6 * dt, 6 * dt);
+                    player.facingAngle = normalizeAngle(player.facingAngle);
                 }
 
-                // Apply acceleration or friction
-                if (joystick.active && targetMagnitude > 0.03) {
-                    // Accelerate toward target speed
+                // --- SPEED ---
+                let targetSpeed = targetMag * MAX_SPEED;
+
+                // Severe speed penalty for sharp turns
+                if (joystick.active && targetMag > 0.04 && currentSpeed > 30) {
+                    if (absAngDiff > 2.4) targetSpeed *= 0.08;
+                    else if (absAngDiff > 1.5) targetSpeed *= 0.2;
+                    else if (absAngDiff > 0.8) targetSpeed *= 0.4;
+                    else if (absAngDiff > 0.4) targetSpeed *= 0.65;
+                }
+
+                // Opposite direction braking
+                let braking = false;
+                if (joystick.active && targetMag > 0.2 && absAngDiff > 2.7 && currentSpeed > 60) {
+                    braking = true;
+                    targetSpeed = 0;
+                }
+
+                if (joystick.active && targetMag > 0.03) {
                     const accel = ACCELERATION * dt;
-                    if (currentSpeed < targetSpeed) {
+                    if (braking) {
+                        player.speed = Math.max(0, currentSpeed - ACCELERATION * OPPOSITE_BRAKE_MULT * dt);
+                    } else if (currentSpeed < targetSpeed) {
                         player.speed = Math.min(currentSpeed + accel, targetSpeed);
                     } else {
-                        // Decelerate to target (if going too fast for current input)
-                        player.speed = Math.max(currentSpeed - accel * 0.8, targetSpeed);
+                        player.speed = Math.max(currentSpeed - accel * 0.5, targetSpeed);
                     }
                 } else {
-                    // No input - friction
                     player.speed = Math.max(0, currentSpeed - FRICTION * dt);
                 }
 
-                // Update velocity vector
+                // Update velocity
                 player.vx = Math.cos(player.velAngle) * player.speed;
                 player.vy = Math.sin(player.velAngle) * player.speed;
-
-                // Update position
                 player.x += player.vx * dt;
                 player.y += player.vy * dt;
 
-                // Wall collision
+                // --- WALL COLLISION (bouncy!) ---
                 let wallHit = false;
+                const bounceRetention = 0.55;
                 if (player.x < WALL_MARGIN) {
                     player.x = WALL_MARGIN;
-                    player.vx = Math.abs(player.vx) * 0.4;
-                    player.speed *= 0.5;
-                    player.velAngle = Math.atan2(player.vy, Math.abs(player.vx));
+                    player.vx = Math.abs(player.vx) * bounceRetention;
+                    player.speed = Math.hypot(player.vx, player.vy);
+                    player.velAngle = Math.atan2(player.vy, player.vx);
                     wallHit = true;
                 }
                 if (player.x > WORLD_SIZE - WALL_MARGIN) {
                     player.x = WORLD_SIZE - WALL_MARGIN;
-                    player.vx = -Math.abs(player.vx) * 0.4;
-                    player.speed *= 0.5;
-                    player.velAngle = Math.atan2(player.vy, -Math.abs(player.vx));
+                    player.vx = -Math.abs(player.vx) * bounceRetention;
+                    player.speed = Math.hypot(player.vx, player.vy);
+                    player.velAngle = Math.atan2(player.vy, player.vx);
                     wallHit = true;
                 }
                 if (player.y < WALL_MARGIN) {
                     player.y = WALL_MARGIN;
-                    player.vy = Math.abs(player.vy) * 0.4;
-                    player.speed *= 0.5;
-                    player.velAngle = Math.atan2(Math.abs(player.vy), player.vx);
+                    player.vy = Math.abs(player.vy) * bounceRetention;
+                    player.speed = Math.hypot(player.vx, player.vy);
+                    player.velAngle = Math.atan2(player.vy, player.vx);
                     wallHit = true;
                 }
                 if (player.y > WORLD_SIZE - WALL_MARGIN) {
                     player.y = WORLD_SIZE - WALL_MARGIN;
-                    player.vy = -Math.abs(player.vy) * 0.4;
-                    player.speed *= 0.5;
-                    player.velAngle = Math.atan2(-Math.abs(player.vy), player.vx);
+                    player.vy = -Math.abs(player.vy) * bounceRetention;
+                    player.speed = Math.hypot(player.vx, player.vy);
+                    player.velAngle = Math.atan2(player.vy, player.vx);
                     wallHit = true;
                 }
                 if (wallHit) {
                     player.vx = Math.cos(player.velAngle) * player.speed;
                     player.vy = Math.sin(player.velAngle) * player.speed;
-                    screenShake = Math.max(screenShake, 6);
-                    spawnParticles(player.x, player.y, 12, '#ff3366', 180, [0.2, 0.7]);
+                    screenShake = Math.max(screenShake, 9);
+                    spawnParticles(player.x, player.y, 20, '#ff3366', 250, [0.2, 0.8], [2, 7]);
+                    comboCount = 0;
+                    comboTimer = 0;
                 }
 
-                // Trail
+                // --- TRAIL ---
                 trailTimer += dt;
-                if (player.speed > 30 && trailTimer > 0.025) {
+                const trailInterval = isDrifting ? 0.012 : 0.03;
+                if (player.speed > 40 && trailTimer > trailInterval) {
                     trailTimer = 0;
                     trailPoints.push({
                         x: player.x,
                         y: player.y,
-                        life: 0.55,
-                        maxLife: 0.55,
+                        life: isDrifting ? 0.7 : 0.45,
+                        maxLife: isDrifting ? 0.7 : 0.45,
                         speed: player.speed,
+                        drifting: isDrifting,
                     });
                     if (trailPoints.length > MAX_TRAIL) trailPoints.shift();
                 }
-                // Age trail
                 for (let i = trailPoints.length - 1; i >= 0; i--) {
                     trailPoints[i].life -= dt;
                     if (trailPoints[i].life <= 0) trailPoints.splice(i, 1);
                 }
 
-                // Collectibles
+                // --- COLLECTIBLES ---
                 for (let i = collectibles.length - 1; i >= 0; i--) {
                     const c = collectibles[i];
-                    const dx = player.x - c.x;
-                    const dy = player.y - c.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const dist = Math.hypot(player.x - c.x, player.y - c.y);
                     if (dist < c.radius + 16) {
-                        // Collected!
-                        const speedBonus = Math.floor(player.speed / 40);
-                        const points = 10 + speedBonus;
+                        const speedBonus = Math.floor(player.speed / 30);
+                        let points = 10 + speedBonus;
+                        if (isDrifting) points = Math.floor(points * 2.5);
                         score += points;
                         comboCount++;
                         comboTimer = COMBO_TIMEOUT;
-                        spawnParticles(c.x, c.y, 18, '#00ffff', 250, [0.3, 1.0]);
+                        spawnParticles(c.x, c.y, 20, isDrifting ? '#ff44cc' : '#00ffff', 300, [0.3, 1.0], [2, 6]);
                         collectibles.splice(i, 1);
                         spawnCollectible();
                         if (comboCount > 3 && comboCount % 3 === 0) {
-                            spawnParticles(player.x, player.y, 8, '#ffff00', 150, [0.2, 0.6]);
+                            spawnParticles(player.x, player.y, 12, '#ffff00', 180, [0.2, 0.7], [1.5, 4]);
                         }
                     }
                 }
 
-                // Combo timer
-                if (comboTimer > 0) {
-                    comboTimer -= dt;
-                    if (comboTimer <= 0) {
-                        comboCount = 0;
+                // --- DRIFT SCORING ---
+                if (isDrifting) {
+                    driftScoreTimer += dt;
+                    if (driftScoreTimer > 0.25) {
+                        driftScoreTimer = 0;
+                        score += Math.floor(driftIntensity * 3) + 1;
+                    }
+                } else {
+                    driftScoreTimer = 0;
+                }
+
+                // --- NEAR MISS ---
+                nearMissCooldown = Math.max(0, nearMissCooldown - dt);
+                if (nearMissCooldown <= 0) {
+                    for (const obs of obstacles) {
+                        const dist = Math.hypot(player.x - obs.x, player.y - obs.y);
+                        const nearMissDist = obs.radius + 45;
+                        if (dist < nearMissDist && dist > obs.radius + 14 && player.speed > 200) {
+                            nearMissCooldown = 0.6;
+                            score += Math.floor(player.speed / 20);
+                            spawnParticles(player.x, player.y, 8, '#ffdd00', 120, [0.15, 0.5], [1, 3]);
+                            break;
+                        }
                     }
                 }
 
-                // Obstacles
+                // --- COMBO TIMER ---
+                if (comboTimer > 0) {
+                    comboTimer -= dt;
+                    if (comboTimer <= 0) comboCount = 0;
+                }
+
+                // --- OBSTACLES ---
                 for (let i = obstacles.length - 1; i >= 0; i--) {
                     const obs = obstacles[i];
-                    const dx = player.x - obs.x;
-                    const dy = player.y - obs.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    const collisionDist = obs.radius + 14;
-                    if (dist < collisionDist) {
-                        // Hit ICE!
-                        const pushAngle = Math.atan2(dy, dx);
-                        player.x = obs.x + Math.cos(pushAngle) * collisionDist;
-                        player.y = obs.y + Math.sin(pushAngle) * collisionDist;
-                        player.speed *= 0.25;
+                    const dist = Math.hypot(player.x - obs.x, player.y - obs.y);
+                    const colDist = obs.radius + 14;
+                    if (dist < colDist) {
+                        const pushAngle = Math.atan2(player.y - obs.y, player.x - obs.x);
+                        player.x = obs.x + Math.cos(pushAngle) * colDist;
+                        player.y = obs.y + Math.sin(pushAngle) * colDist;
+                        player.speed *= 0.2;
                         player.vx = Math.cos(player.velAngle) * player.speed;
                         player.vy = Math.sin(player.velAngle) * player.speed;
                         comboCount = 0;
                         comboTimer = 0;
-                        screenShake = Math.max(screenShake, 10);
-                        hitFlash = 0.35;
-                        spawnParticles(obs.x, obs.y, 22, '#ff0044', 300, [0.3, 1.1]);
-                        // Move obstacle away
-                        obstacles[i].x = clamp(obs.x + (Math.random() - 0.5) * 400, WALL_MARGIN + 50, WORLD_SIZE -
-                            WALL_MARGIN - 50);
-                        obstacles[i].y = clamp(obs.y + (Math.random() - 0.5) * 400, WALL_MARGIN + 50, WORLD_SIZE -
-                            WALL_MARGIN - 50);
+                        screenShake = Math.max(screenShake, 14);
+                        hitFlash = 0.4;
+                        spawnParticles(obs.x, obs.y, 30, '#ff0044', 350, [0.3, 1.2], [2, 8]);
+                        obstacles[i].x = clamp(obs.x + (Math.random() - 0.5) * 500, WALL_MARGIN + 60, WORLD_SIZE -
+                            WALL_MARGIN - 60);
+                        obstacles[i].y = clamp(obs.y + (Math.random() - 0.5) * 500, WALL_MARGIN + 60, WORLD_SIZE -
+                            WALL_MARGIN - 60);
                     }
                 }
 
-                // Screen shake decay
-                screenShake = Math.max(0, screenShake - dt * 18);
-                hitFlash = Math.max(0, hitFlash - dt * 2.5);
+                // --- DECAY ---
+                screenShake = Math.max(0, screenShake - dt * 16);
+                hitFlash = Math.max(0, hitFlash - dt * 3);
 
-                // Camera follow
+                // --- CAMERA ---
+                const camLagSpeed = lerp(6, 2.5, clamp(currentSpeed / MAX_SPEED, 0, 1));
                 camera.targetX = player.x - W / 2;
                 camera.targetY = player.y - H / 2;
-                camera.x = lerp(camera.x, camera.targetX, 8 * dt);
-                camera.y = lerp(camera.y, camera.targetY, 8 * dt);
+                camera.x = lerp(camera.x, camera.targetX, camLagSpeed * dt);
+                camera.y = lerp(camera.y, camera.targetY, camLagSpeed * dt);
+                camera.zoomTarget = lerp(1, 0.82, clamp((currentSpeed - 300) / 500, 0, 1));
+                camera.zoom = lerp(camera.zoom, camera.zoomTarget, 3 * dt);
 
-                // Apply screen shake
                 if (screenShake > 0.1) {
-                    camera.x += (Math.random() - 0.5) * screenShake * 2;
-                    camera.y += (Math.random() - 0.5) * screenShake * 2;
+                    camera.x += (Math.random() - 0.5) * screenShake * 2.5;
+                    camera.y += (Math.random() - 0.5) * screenShake * 2.5;
                 }
 
-                // Update particles
+                // --- PARTICLES ---
                 for (let i = particles.length - 1; i >= 0; i--) {
                     const p = particles[i];
                     p.x += p.vx * dt;
@@ -657,144 +669,164 @@
                     if (p.life <= 0) particles.splice(i, 1);
                 }
 
-                // Update collectible pulses
-                for (const c of collectibles) c.pulse += dt * 3.5;
-                for (const o of obstacles) o.pulse += dt * 2.8;
-
-                // Instructions fade
-                if (instructionsFading && instructionsOpacity > 0) {
-                    instructionsOpacity = Math.max(0, instructionsOpacity - dt * 1.5);
-                    instructionsEl.style.opacity = instructionsOpacity;
-                    if (instructionsOpacity <= 0) {
-                        instructionsEl.classList.add('fading');
+                // --- DRIFT SPARKS ---
+                if (isDrifting && player.speed > 300) {
+                    const sparkInterval = 0.04 / driftIntensity;
+                    if (Math.random() < dt / sparkInterval) {
+                        const behindX = player.x - Math.cos(player.velAngle) * 20;
+                        const behindY = player.y - Math.sin(player.velAngle) * 20;
+                        const spreadAngle = player.velAngle + Math.PI + (Math.random() - 0.5) * 1.8;
+                        const sparkSpeed = player.speed * 0.3 * (0.5 + Math.random());
+                        particles.push({
+                            x: behindX,
+                            y: behindY,
+                            vx: Math.cos(spreadAngle) * sparkSpeed,
+                            vy: Math.sin(spreadAngle) * sparkSpeed,
+                            life: 0.2 + Math.random() * 0.5,
+                            maxLife: 0.7,
+                            color: '#ff44cc',
+                            size: 1 + Math.random() * 4,
+                        });
+                        if (particles.length > MAX_PARTICLES) particles.splice(0, 5);
                     }
                 }
 
-                // Update speed display
+                // --- PULSE ---
+                for (const c of collectibles) c.pulse += dt * 4;
+                for (const o of obstacles) o.pulse += dt * 3.2;
+
+                // --- INSTRUCTIONS ---
+                if (instructionsFading && instructionsOpacity > 0) {
+                    instructionsOpacity = Math.max(0, instructionsOpacity - dt * 1.8);
+                    instructionsEl.style.opacity = instructionsOpacity;
+                    if (instructionsOpacity <= 0) instructionsEl.classList.add('fading');
+                }
+
+                // --- HUD ---
                 speedValEl.textContent = Math.floor(player.speed);
+                if (isDrifting) {
+                    hudDrift.classList.add('active');
+                } else {
+                    hudDrift.classList.remove('active');
+                }
             }
 
-            // --- Render ---
+            // --- RENDER ---
             function drawGrid() {
-                const gridSpacing = 80;
-                const startX = Math.floor(camera.x / gridSpacing) * gridSpacing;
-                const startY = Math.floor(camera.y / gridSpacing) * gridSpacing;
-
-                ctx.strokeStyle = 'rgba(0, 255, 255, 0.08)';
+                const gs = 90;
+                const sx0 = Math.floor(camera.x / gs) * gs;
+                const sy0 = Math.floor(camera.y / gs) * gs;
+                ctx.strokeStyle = 'rgba(0,255,255,0.06)';
                 ctx.lineWidth = 1;
-
-                for (let wx = startX; wx < camera.x + W + gridSpacing; wx += gridSpacing) {
+                for (let wx = sx0; wx < camera.x + W + gs; wx += gs) {
                     if (wx < 0 || wx > WORLD_SIZE) continue;
-                    const sx = wx - camera.x;
                     ctx.beginPath();
-                    ctx.moveTo(sx, 0);
-                    ctx.lineTo(sx, H);
+                    ctx.moveTo(wx - camera.x, 0);
+                    ctx.lineTo(wx - camera.x, H);
                     ctx.stroke();
                 }
-                for (let wy = startY; wy < camera.y + H + gridSpacing; wy += gridSpacing) {
+                for (let wy = sy0; wy < camera.y + H + gs; wy += gs) {
                     if (wy < 0 || wy > WORLD_SIZE) continue;
-                    const sy = wy - camera.y;
                     ctx.beginPath();
-                    ctx.moveTo(0, sy);
-                    ctx.lineTo(W, sy);
+                    ctx.moveTo(0, wy - camera.y);
+                    ctx.lineTo(W, wy - camera.y);
                     ctx.stroke();
                 }
-
-                // Major grid lines
-                const majorSpacing = 320;
-                const mStartX = Math.floor(camera.x / majorSpacing) * majorSpacing;
-                const mStartY = Math.floor(camera.y / majorSpacing) * majorSpacing;
-                ctx.strokeStyle = 'rgba(0, 255, 255, 0.18)';
+                const mgs = 360;
+                const msx = Math.floor(camera.x / mgs) * mgs;
+                const msy = Math.floor(camera.y / mgs) * mgs;
+                ctx.strokeStyle = 'rgba(255,0,170,0.12)';
                 ctx.lineWidth = 1.5;
-                for (let wx = mStartX; wx < camera.x + W + majorSpacing; wx += majorSpacing) {
+                for (let wx = msx; wx < camera.x + W + mgs; wx += mgs) {
                     if (wx < 0 || wx > WORLD_SIZE) continue;
-                    const sx = wx - camera.x;
                     ctx.beginPath();
-                    ctx.moveTo(sx, 0);
-                    ctx.lineTo(sx, H);
+                    ctx.moveTo(wx - camera.x, 0);
+                    ctx.lineTo(wx - camera.x, H);
                     ctx.stroke();
                 }
-                for (let wy = mStartY; wy < camera.y + H + majorSpacing; wy += majorSpacing) {
+                for (let wy = msy; wy < camera.y + H + mgs; wy += mgs) {
                     if (wy < 0 || wy > WORLD_SIZE) continue;
-                    const sy = wy - camera.y;
                     ctx.beginPath();
-                    ctx.moveTo(0, sy);
-                    ctx.lineTo(W, sy);
+                    ctx.moveTo(0, wy - camera.y);
+                    ctx.lineTo(W, wy - camera.y);
                     ctx.stroke();
                 }
             }
 
             function drawWorldBorder() {
-                const topLeft = worldToScreen(0, 0);
-                const topRight = worldToScreen(WORLD_SIZE, 0);
-                const bottomLeft = worldToScreen(0, WORLD_SIZE);
-                const bottomRight = worldToScreen(WORLD_SIZE, WORLD_SIZE);
-
-                ctx.strokeStyle = '#ff00ff';
-                ctx.lineWidth = 3;
-                ctx.shadowColor = '#ff00ff';
-                ctx.shadowBlur = 18;
-                ctx.strokeRect(topLeft.x, topLeft.y, WORLD_SIZE, WORLD_SIZE);
+                const tl = worldToScreen(0, 0);
+                ctx.strokeStyle = '#ff00aa';
+                ctx.lineWidth = 4;
+                ctx.shadowColor = '#ff00aa';
+                ctx.shadowBlur = 25;
+                ctx.strokeRect(tl.x, tl.y, WORLD_SIZE, WORLD_SIZE);
                 ctx.shadowBlur = 0;
-
-                // Inner glow line
-                ctx.strokeStyle = 'rgba(255, 0, 255, 0.35)';
+                ctx.strokeStyle = 'rgba(255,0,170,0.3)';
                 ctx.lineWidth = 1;
-                ctx.setLineDash([15, 25]);
-                ctx.strokeRect(topLeft.x + 4, topLeft.y + 4, WORLD_SIZE - 8, WORLD_SIZE - 8);
+                ctx.setLineDash([20, 30]);
+                ctx.strokeRect(tl.x + 6, tl.y + 6, WORLD_SIZE - 12, WORLD_SIZE - 12);
                 ctx.setLineDash([]);
             }
 
-            function drawCursorCharacter() {
+            function drawCursor() {
                 const sx = player.x - camera.x;
                 const sy = player.y - camera.y;
-                const angle = player.velAngle;
-                const size = 22;
+                const facingAng = player.facingAngle;
+                const size = 24;
 
                 ctx.save();
                 ctx.translate(sx, sy);
-                ctx.rotate(angle);
+                ctx.rotate(facingAng);
 
-                // Glow
-                ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur = 22;
+                // Drift glow
+                if (isDrifting) {
+                    ctx.shadowColor = '#ff44cc';
+                    ctx.shadowBlur = 35 + driftIntensity * 30;
+                } else {
+                    ctx.shadowColor = '#00ffff';
+                    ctx.shadowBlur = 20;
+                }
 
-                // Main cursor arrow shape
-                ctx.fillStyle = '#00ffff';
+                // Main body
+                const bodyColor = isDrifting ? '#ff44cc' : '#00ffff';
+                ctx.fillStyle = bodyColor;
                 ctx.beginPath();
-                ctx.moveTo(size, 0); // tip
-                ctx.lineTo(-size * 0.55, -size * 0.55); // top-left
-                ctx.lineTo(-size * 0.25, -size * 0.15); // inner notch top
-                ctx.lineTo(-size * 0.25, size * 0.15); // inner notch bottom
-                ctx.lineTo(-size * 0.55, size * 0.55); // bottom-left
+                ctx.moveTo(size, 0);
+                ctx.lineTo(-size * 0.55, -size * 0.6);
+                ctx.lineTo(-size * 0.22, -size * 0.14);
+                ctx.lineTo(-size * 0.22, size * 0.14);
+                ctx.lineTo(-size * 0.55, size * 0.6);
                 ctx.closePath();
                 ctx.fill();
 
-                // Bright core
-                ctx.shadowBlur = 8;
+                // Inner bright
+                ctx.shadowBlur = 6;
                 ctx.fillStyle = '#ffffff';
                 ctx.beginPath();
-                ctx.moveTo(size * 0.7, 0);
-                ctx.lineTo(-size * 0.2, -size * 0.25);
-                ctx.lineTo(-size * 0.05, 0);
-                ctx.lineTo(-size * 0.2, size * 0.25);
+                ctx.moveTo(size * 0.65, 0);
+                ctx.lineTo(-size * 0.15, -size * 0.28);
+                ctx.lineTo(-size * 0.03, 0);
+                ctx.lineTo(-size * 0.15, size * 0.28);
                 ctx.closePath();
                 ctx.fill();
 
                 ctx.shadowBlur = 0;
                 ctx.restore();
 
-                // Outer ring glow when fast
-                if (player.speed > 200) {
-                    const glowIntensity = clamp((player.speed - 200) / (MAX_SPEED - 200), 0, 1);
+                // Outer ring at high speed
+                if (player.speed > 250) {
+                    const gi = clamp((player.speed - 250) / 550, 0, 1);
                     ctx.save();
                     ctx.translate(sx, sy);
-                    ctx.shadowColor = '#00ffff';
-                    ctx.shadowBlur = 30 * glowIntensity;
-                    ctx.strokeStyle = `rgba(0, 255, 255, ${0.5 * glowIntensity})`;
-                    ctx.lineWidth = 2;
+                    const ringColor = isDrifting ?
+                        `rgba(255,68,204,${0.6*gi})` :
+                        `rgba(0,255,255,${0.5*gi})`;
+                    ctx.shadowColor = isDrifting ? '#ff44cc' : '#00ffff';
+                    ctx.shadowBlur = 35 * gi;
+                    ctx.strokeStyle = ringColor;
+                    ctx.lineWidth = 2.5;
                     ctx.beginPath();
-                    ctx.arc(0, 0, size * 1.5, 0, Math.PI * 2);
+                    ctx.arc(0, 0, size * 1.6, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.shadowBlur = 0;
                     ctx.restore();
@@ -806,23 +838,29 @@
                 for (let i = 1; i < trailPoints.length; i++) {
                     const t0 = trailPoints[i - 1];
                     const t1 = trailPoints[i];
-                    const alpha0 = clamp(t0.life / t0.maxLife, 0, 1);
-                    const alpha1 = clamp(t1.life / t1.maxLife, 0, 1);
-                    const avgAlpha = (alpha0 + alpha1) / 2;
-                    if (avgAlpha < 0.02) continue;
-
+                    const a0 = clamp(t0.life / t0.maxLife, 0, 1);
+                    const a1 = clamp(t1.life / t1.maxLife, 0, 1);
+                    const avgA = (a0 + a1) / 2;
+                    if (avgA < 0.015) continue;
                     const s0 = worldToScreen(t0.x, t0.y);
                     const s1 = worldToScreen(t1.x, t1.y);
-
-                    ctx.strokeStyle = `rgba(0, 255, 255, ${avgAlpha * 0.7})`;
-                    ctx.lineWidth = 3 * avgAlpha + 1;
-                    ctx.shadowColor = `rgba(0, 255, 255, ${avgAlpha * 0.6})`;
-                    ctx.shadowBlur = 6 * avgAlpha;
+                    const isDriftTrail = t0.drifting || t1.drifting;
+                    const trailColor = isDriftTrail ?
+                        `rgba(255,68,204,${avgA*0.8})` :
+                        `rgba(0,255,255,${avgA*0.65})`;
+                    ctx.strokeStyle = trailColor;
+                    ctx.lineWidth = (isDriftTrail ? 5 : 3) * avgA + 1.5;
+                    ctx.shadowColor = isDriftTrail ?
+                        `rgba(255,68,204,${avgA*0.7})` :
+                        `rgba(0,255,255,${avgA*0.5})`;
+                    ctx.shadowBlur = isDriftTrail ? 12 * avgA : 7 * avgA;
+                    ctx.lineCap = 'round';
                     ctx.beginPath();
                     ctx.moveTo(s0.x, s0.y);
                     ctx.lineTo(s1.x, s1.y);
                     ctx.stroke();
                     ctx.shadowBlur = 0;
+                    ctx.lineCap = 'butt';
                 }
             }
 
@@ -830,19 +868,14 @@
                 for (const c of collectibles) {
                     const s = worldToScreen(c.x, c.y);
                     if (!isOnScreen(s.x, s.y, 40)) continue;
-
-                    const pulse = 1 + Math.sin(c.pulse) * 0.25;
+                    const pulse = 1 + Math.sin(c.pulse) * 0.3;
                     const r = c.radius * pulse;
-
-                    // Outer glow
                     ctx.shadowColor = '#00ffff';
-                    ctx.shadowBlur = 16;
-                    ctx.fillStyle = 'rgba(0, 255, 255, 0.25)';
+                    ctx.shadowBlur = 18;
+                    ctx.fillStyle = 'rgba(0,255,255,0.2)';
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, r + 6, 0, Math.PI * 2);
+                    ctx.arc(s.x, s.y, r + 7, 0, Math.PI * 2);
                     ctx.fill();
-
-                    // Diamond shape
                     ctx.shadowBlur = 10;
                     ctx.fillStyle = '#00ffff';
                     ctx.beginPath();
@@ -852,14 +885,11 @@
                     ctx.lineTo(s.x - r * 0.7, s.y);
                     ctx.closePath();
                     ctx.fill();
-
-                    // Inner bright
                     ctx.fillStyle = '#ffffff';
-                    ctx.shadowBlur = 4;
+                    ctx.shadowBlur = 3;
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, r * 0.35, 0, Math.PI * 2);
+                    ctx.arc(s.x, s.y, r * 0.3, 0, Math.PI * 2);
                     ctx.fill();
-
                     ctx.shadowBlur = 0;
                 }
             }
@@ -867,24 +897,19 @@
             function drawObstacles() {
                 for (const obs of obstacles) {
                     const s = worldToScreen(obs.x, obs.y);
-                    if (!isOnScreen(s.x, s.y, 50)) continue;
-
-                    const pulse = 1 + Math.sin(obs.pulse) * 0.2;
+                    if (!isOnScreen(s.x, s.y, 55)) continue;
+                    const pulse = 1 + Math.sin(obs.pulse) * 0.22;
                     const r = obs.radius * pulse;
-
-                    // Outer danger glow
                     ctx.shadowColor = '#ff0044';
-                    ctx.shadowBlur = 24;
-                    ctx.fillStyle = 'rgba(255, 0, 60, 0.2)';
+                    ctx.shadowBlur = 28;
+                    ctx.fillStyle = 'rgba(255,0,50,0.18)';
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, r + 8, 0, Math.PI * 2);
+                    ctx.arc(s.x, s.y, r + 9, 0, Math.PI * 2);
                     ctx.fill();
-
-                    // Hexagonal ICE shape
-                    ctx.shadowBlur = 14;
-                    ctx.fillStyle = 'rgba(255, 20, 60, 0.7)';
-                    ctx.strokeStyle = '#ff3366';
-                    ctx.lineWidth = 2;
+                    ctx.shadowBlur = 16;
+                    ctx.fillStyle = 'rgba(255,20,50,0.7)';
+                    ctx.strokeStyle = '#ff3355';
+                    ctx.lineWidth = 2.5;
                     ctx.beginPath();
                     const sides = 6;
                     for (let i = 0; i < sides; i++) {
@@ -897,18 +922,15 @@
                     ctx.closePath();
                     ctx.fill();
                     ctx.stroke();
-
-                    // Inner X
                     ctx.strokeStyle = '#ff6688';
                     ctx.lineWidth = 2;
-                    ctx.shadowBlur = 6;
+                    ctx.shadowBlur = 5;
                     ctx.beginPath();
                     ctx.moveTo(s.x - r * 0.5, s.y - r * 0.5);
                     ctx.lineTo(s.x + r * 0.5, s.y + r * 0.5);
                     ctx.moveTo(s.x + r * 0.5, s.y - r * 0.5);
                     ctx.lineTo(s.x - r * 0.5, s.y + r * 0.5);
                     ctx.stroke();
-
                     ctx.shadowBlur = 0;
                 }
             }
@@ -918,17 +940,18 @@
                     const s = worldToScreen(p.x, p.y);
                     if (!isOnScreen(s.x, s.y, 20)) continue;
                     const alpha = clamp(p.life / p.maxLife, 0, 1);
-                    ctx.fillStyle = p.color.replace(')', `, ${alpha})`).replace('rgb',
-                        'rgba');
+                    let fillColor;
                     if (p.color.startsWith('#')) {
-                        const hex = p.color;
-                        const r = parseInt(hex.slice(1, 3), 16);
-                        const g = parseInt(hex.slice(3, 5), 16);
-                        const b = parseInt(hex.slice(5, 7), 16);
-                        ctx.fillStyle = `rgba(${r},${g},${b},${alpha})`;
+                        const r = parseInt(p.color.slice(1, 3), 16);
+                        const g = parseInt(p.color.slice(3, 5), 16);
+                        const b = parseInt(p.color.slice(5, 7), 16);
+                        fillColor = `rgba(${r},${g},${b},${alpha})`;
+                    } else {
+                        fillColor = p.color;
                     }
-                    ctx.shadowColor = ctx.fillStyle;
-                    ctx.shadowBlur = 4 * alpha;
+                    ctx.fillStyle = fillColor;
+                    ctx.shadowColor = fillColor;
+                    ctx.shadowBlur = 5 * alpha;
                     ctx.beginPath();
                     ctx.arc(s.x, s.y, p.size * alpha, 0, Math.PI * 2);
                     ctx.fill();
@@ -937,127 +960,113 @@
             }
 
             function drawJoystick() {
-                const jbx = joystick.baseX;
-                const jby = joystick.baseY;
-                const jkx = joystick.knobX;
-                const jky = joystick.knobY;
-
-                // Base
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+                const jbx = joystick.baseX,
+                    jby = joystick.baseY;
+                const jkx = joystick.knobX,
+                    jky = joystick.knobY;
+                ctx.fillStyle = 'rgba(0,0,0,0.55)';
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.arc(jbx, jby, joystick.baseRadius, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
-
-                // Inner ring
-                ctx.strokeStyle = 'rgba(0, 255, 255, 0.4)';
+                ctx.strokeStyle = 'rgba(255,0,170,0.4)';
                 ctx.lineWidth = 1;
-                ctx.setLineDash([8, 12]);
+                ctx.setLineDash([10, 14]);
                 ctx.beginPath();
-                ctx.arc(jbx, jby, joystick.baseRadius * 0.7, 0, Math.PI * 2);
+                ctx.arc(jbx, jby, joystick.baseRadius * 0.68, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.setLineDash([]);
-
-                // Knob
                 const knobGrad = ctx.createRadialGradient(jkx, jky, 0, jkx, jky, joystick.knobRadius);
-                knobGrad.addColorStop(0, 'rgba(0, 255, 255, 0.9)');
-                knobGrad.addColorStop(0.5, 'rgba(0, 200, 220, 0.6)');
-                knobGrad.addColorStop(1, 'rgba(0, 100, 150, 0.3)');
+                knobGrad.addColorStop(0, 'rgba(255,0,170,0.85)');
+                knobGrad.addColorStop(0.5, 'rgba(200,0,120,0.55)');
+                knobGrad.addColorStop(1, 'rgba(80,0,50,0.3)');
                 ctx.fillStyle = knobGrad;
-                ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur = 18;
+                ctx.shadowColor = '#ff00aa';
+                ctx.shadowBlur = 20;
                 ctx.beginPath();
                 ctx.arc(jkx, jky, joystick.knobRadius, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.shadowBlur = 0;
-
-                // Knob highlight
-                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
                 ctx.beginPath();
-                ctx.arc(jkx - 6, jky - 8, joystick.knobRadius * 0.35, 0, Math.PI * 2);
+                ctx.arc(jkx - 7, jky - 9, joystick.knobRadius * 0.3, 0, Math.PI * 2);
                 ctx.fill();
             }
 
             function drawHUD() {
                 // Score
                 ctx.fillStyle = '#ffffff';
-                ctx.font = 'bold 20px "Courier New", "SF Mono", monospace';
+                ctx.font = 'bold 21px "Courier New","SF Mono",monospace';
                 ctx.textAlign = 'right';
                 ctx.shadowColor = '#00ffff';
-                ctx.shadowBlur = 8;
-                ctx.fillText(`◈ ${score.toString().padStart(6, '0')}`, W - 30, 50);
+                ctx.shadowBlur = 10;
+                ctx.fillText(`◈ ${score.toString().padStart(6,'0')}`, W - 30, 50);
                 ctx.shadowBlur = 0;
-
-                // Combo
                 if (comboCount > 2) {
                     ctx.fillStyle = '#ffff00';
-                    ctx.font = 'bold 16px "Courier New", "SF Mono", monospace';
+                    ctx.font = 'bold 15px "Courier New","SF Mono",monospace';
                     ctx.textAlign = 'right';
                     ctx.shadowColor = '#ffff00';
-                    ctx.shadowBlur = 10;
-                    ctx.fillText(`COMBO x${comboCount}`, W - 30, 78);
+                    ctx.shadowBlur = 12;
+                    ctx.fillText(`COMBO x${comboCount}`, W - 30, 76);
                     ctx.shadowBlur = 0;
                 }
-
                 // Speed bar
-                const barX = W - 180;
-                const barY = H - 40;
-                const barW = 150;
-                const barH = 8;
-                const speedFrac = clamp(player.speed / MAX_SPEED, 0, 1);
-
+                const barX = W - 185,
+                    barY = H - 42,
+                    barW = 155,
+                    barH = 9;
+                const sf = clamp(player.speed / MAX_SPEED, 0, 1);
                 ctx.fillStyle = 'rgba(0,0,0,0.6)';
-                ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
-                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.fillRect(barX - 3, barY - 3, barW + 6, barH + 6);
+                ctx.strokeStyle = 'rgba(255,255,255,0.25)';
                 ctx.lineWidth = 1;
-                ctx.strokeRect(barX - 2, barY - 2, barW + 4, barH + 4);
-
-                // Speed bar fill
+                ctx.strokeRect(barX - 3, barY - 3, barW + 6, barH + 6);
                 let barColor;
-                if (speedFrac < 0.4) barColor = '#00ff88';
-                else if (speedFrac < 0.75) barColor = '#ffcc00';
+                if (sf < 0.35) barColor = '#00ff88';
+                else if (sf < 0.7) barColor = '#ffcc00';
                 else barColor = '#ff3366';
-
                 const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
                 grad.addColorStop(0, barColor);
-                grad.addColorStop(1, barColor.replace('ff', 'ff').replace('33', '00'));
+                grad.addColorStop(1, barColor.replace('ff', 'cc'));
                 ctx.fillStyle = grad;
-                ctx.fillRect(barX, barY, barW * speedFrac, barH);
-
-                // Glow on bar
+                ctx.fillRect(barX, barY, barW * sf, barH);
                 ctx.shadowColor = barColor;
-                ctx.shadowBlur = 8;
+                ctx.shadowBlur = 10;
                 ctx.fillStyle = barColor;
-                ctx.fillRect(barX + barW * speedFrac - 3, barY - 1, 6, barH + 2);
+                ctx.fillRect(barX + barW * sf - 4, barY - 2, 8, barH + 4);
                 ctx.shadowBlur = 0;
-
-                // Label
                 ctx.fillStyle = '#ffffff88';
-                ctx.font = '11px "Courier New", "SF Mono", monospace';
+                ctx.font = '10px "Courier New","SF Mono",monospace';
                 ctx.textAlign = 'right';
-                ctx.fillText('SPEED', barX - 10, barY + barH - 2);
+                ctx.fillText('SPD', barX - 12, barY + barH - 1);
             }
 
             function drawHitFlash() {
                 if (hitFlash > 0.01) {
-                    ctx.fillStyle = `rgba(255, 0, 40, ${hitFlash * 0.35})`;
+                    ctx.fillStyle = `rgba(255,0,40,${hitFlash*0.4})`;
                     ctx.fillRect(0, 0, W, H);
                 }
             }
 
             function render() {
-                // Clear
-                ctx.fillStyle = '#0a0a14';
+                ctx.fillStyle = '#060612';
+                ctx.fillRect(0, 0, W, H);
+                const vigGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.5, W / 2, H / 2, W * 0.95);
+                vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                vigGrad.addColorStop(1, 'rgba(0,0,0,0.6)');
+                ctx.fillStyle = vigGrad;
                 ctx.fillRect(0, 0, W, H);
 
-                // Subtle vignette
-                const vignetteGrad = ctx.createRadialGradient(W / 2, H / 2, W * 0.55, W / 2, H / 2, W * 0.95);
-                vignetteGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.55)');
-                ctx.fillStyle = vignetteGrad;
-                ctx.fillRect(0, 0, W, H);
+                // Apply camera zoom
+                ctx.save();
+                const zx = W / 2,
+                    zy = H / 2;
+                ctx.translate(zx, zy);
+                ctx.scale(camera.zoom, camera.zoom);
+                ctx.translate(-zx, -zy);
 
                 drawGrid();
                 drawWorldBorder();
@@ -1065,39 +1074,37 @@
                 drawCollectibles();
                 drawObstacles();
                 drawParticles();
-                drawCursorCharacter();
+                drawCursor();
+                ctx.restore();
+
                 drawHitFlash();
                 drawJoystick();
                 drawHUD();
 
-                // Joystick zone hint (subtle)
                 if (!joystick.active && !gameStarted) {
-                    const jbx = joystick.fixedBaseX;
-                    const jby = joystick.fixedBaseY;
-                    const pulse = 0.35 + Math.sin(performance.now() / 1000) * 0.2;
+                    const jbx = joystick.fixedBaseX,
+                        jby = joystick.fixedBaseY;
+                    const pulse = 0.3 + Math.sin(performance.now() / 900) * 0.25;
                     ctx.strokeStyle = `rgba(255,255,255,${pulse})`;
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([6, 8]);
+                    ctx.lineWidth = 2.5;
+                    ctx.setLineDash([8, 10]);
                     ctx.beginPath();
-                    ctx.arc(jbx, jby, joystick.baseRadius + 15, 0, Math.PI * 2);
+                    ctx.arc(jbx, jby, joystick.baseRadius + 18, 0, Math.PI * 2);
                     ctx.stroke();
                     ctx.setLineDash([]);
                 }
             }
 
-            // --- Game Loop ---
             function gameLoop(timestamp) {
                 let dt = (timestamp - lastTime) / 1000;
                 if (dt <= 0) dt = 0.016;
-                if (dt > 0.15) dt = 0.15; // Cap to avoid huge jumps
+                if (dt > 0.15) dt = 0.15;
                 lastTime = timestamp;
-
                 update(dt);
                 render();
                 requestAnimationFrame(gameLoop);
             }
 
-            // --- Initialize ---
             function init() {
                 updateJoystickFixedBase();
                 joystick.baseX = joystick.fixedBaseX;
@@ -1110,10 +1117,13 @@
                 player.vy = 0;
                 player.speed = 0;
                 player.velAngle = 0;
+                player.facingAngle = 0;
                 camera.x = player.x - W / 2;
                 camera.y = player.y - H / 2;
                 camera.targetX = camera.x;
                 camera.targetY = camera.y;
+                camera.zoom = 1;
+                camera.zoomTarget = 1;
                 collectibles.length = 0;
                 obstacles.length = 0;
                 particles.length = 0;
@@ -1123,11 +1133,16 @@
                 comboTimer = 0;
                 screenShake = 0;
                 hitFlash = 0;
+                isDrifting = false;
+                driftIntensity = 0;
+                driftScoreTimer = 0;
+                nearMissCooldown = 0;
                 instructionsOpacity = 1;
                 instructionsFading = false;
                 gameStarted = false;
                 instructionsEl.classList.remove('fading');
                 instructionsEl.style.opacity = '1';
+                hudDrift.classList.remove('active');
                 speedValEl.textContent = '0';
                 initCollectibles();
                 initObstacles();
@@ -1135,7 +1150,6 @@
 
             init();
 
-            // Handle resize
             const origResize = resizeCanvas;
             resizeCanvas = function() {
                 origResize();
@@ -1152,16 +1166,14 @@
                 camera.targetY = camera.y;
             };
 
-            // Start
             requestAnimationFrame(gameLoop);
-
-            console.log('◈ NEON DRIFT READY ◈');
-            console.log('🕹️  Use joystick (bottom-left) to move');
-            console.log('💨 Smooth turns maintain speed');
-            console.log('⚠️  Sharp turns cause speed loss');
-            console.log('💎 Collect cyan data nodes');
-            console.log('🧊 Avoid red ICE obstacles');
-            console.log('📱 Optimized for iPad touch');
+            console.log('🔥 DRIFT OUT OF CONTROL - READY 🔥');
+            console.log('🕹️  Joystick suggests direction - cursor has a mind of its own');
+            console.log('💨 Smooth arcs maintain speed');
+            console.log('⚠️  Sharp turns = MASSIVE DRIFT + speed loss');
+            console.log('💎 Collect data nodes - 2.5x points while drifting!');
+            console.log('🧊 Avoid ICE obstacles');
+            console.log('✨ Near-miss obstacles at high speed for bonus points');
         })();
     </script>
 </body>
