@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>DRIFT OUT OF CONTROL – ARMED</title>
+    <style>
+        :root { --bg: #050510; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            background: var(--bg);
+            overflow: hidden;
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            font-family: 'Courier New', 'SF Mono', monospace;
+        }
+        canvas { display:block; position:absolute; top:0; left:0; width:100%; height:100%; }
+        #instructions {
+            position: absolute; bottom: 45%; left: 50%; transform: translate(-50%, 50%);
+            color: #ff00aa; font-size: clamp(13px,2.5vw,16px); text-align: center;
+            pointer-events: none; opacity:0.9; letter-spacing:3px;
+            text-shadow: 0 0 25px #ff00aa, 0 0 50px #ff006688;
+            transition: opacity 0.6s ease; z-index:10; line-height:1.5;
+        }
+        #instructions.fading { opacity:0; }
+        #hud-drift {
+            position: absolute; top: 45px; left: 50%; transform: translateX(-50%);
+            color: #ff00aa; font-size: 22px; letter-spacing:6px;
+            pointer-events: none; text-shadow:0 0 20px #ff00aa, 0 0 40px #ff0066;
+            z-index:5; opacity:0; transition: opacity 0.2s; font-weight:bold;
+        }
+        #hud-drift.active { opacity:1; animation: driftPulse 0.3s infinite alternate; }
+        @keyframes driftPulse { from{text-shadow:0 0 20px #ff00aa,0 0 40px #ff0066;} to{text-shadow:0 0 35px #ff44cc,0 0 70px #ff0088,0 0 100px #ff0044;} }
+        #hud-speed { position:absolute; bottom:30px; right:30px; color:#00ffff; font-size:12px; letter-spacing:2px; pointer-events:none; text-shadow:0 0 10px #00ffff; z-index:5; }
+        #hud-drones { position:absolute; bottom:30px; left:30px; color:#ffaa00; font-size:13px; letter-spacing:2px; pointer-events:none; text-shadow:0 0 10px #ffaa00; z-index:5; }
+        #hud-maxspd { position:absolute; bottom:65px; right:30px; color:#ff3366; font-size:11px; pointer-events:none; text-shadow:0 0 8px #ff3366; z-index:5; }
+        #gameover {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #ff0044; font-size: 40px; letter-spacing: 8px;
+            text-align: center; pointer-events: none; opacity:0;
+            text-shadow: 0 0 30px #ff0044, 0 0 60px #ff0000; z-index:20;
+            transition: opacity 0.4s;
+        }
+        #gameover.active { opacity:1; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="instructions">⚠️ DRIFT & DESTROY ⚠️<br><span style="font-size:0.65em;opacity:0.7;">left stick: drift  |  right stick: aim & fire drone</span><br><span style="font-size:0.5em;opacity:0.5;">crashes reduce max speed – survive as long as you can</span></div>
+    <div id="hud-drift">◈ DRIFT ◈</div>
+    <div id="hud-speed">SPD <span id="speedVal">0</span></div>
+    <div id="hud-maxspd">MAX <span id="maxSpdVal">880</span></div>
+    <div id="hud-drones">🚀 <span id="droneCount">0</span></div>
+    <div id="gameover">💀 TOTALED 💀<br><span style="font-size:0.35em;opacity:0.8;">tap to restart</span></div>
+
+    <script>
+        (function() {
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            const instructionsEl = document.getElementById('instructions');
+            const hudDrift = document.getElementById('hud-drift');
+            const speedValEl = document.getElementById('speedVal');
+            const maxSpdValEl = document.getElementById('maxSpdVal');
+            const droneCountEl = document.getElementById('droneCount');
+            const gameoverEl = document.getElementById('gameover');
+
+            // --- Canvas Setup ---
+            let dpr = Math.min(window.devicePixelRatio || 1, 2);
+            let W, H;
+            function resizeCanvas() {
+                W = window.innerWidth; H = window.innerHeight;
+                canvas.width = W * dpr; canvas.height = H * dpr;
+                canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+                ctx.setTransform(1,0,0,1,0,0); ctx.scale(dpr, dpr);
+            }
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            window.addEventListener('orientationchange', ()=>setTimeout(resizeCanvas,200));
+
+            // --- World ---
+            const WORLD_SIZE = 2800;
+            const WORLD_HALF = WORLD_SIZE/2;
+            const WALL_MARGIN = 70;
+
+            // --- Player ---
+            const player = {
+                x: WORLD_HALF, y: WORLD_HALF,
+                vx:0, vy:0, speed:0,
+                velAngle:0, facingAngle:0,
+                maxSpeed: 880, currentMaxSpeed: 880  // degrades
+            };
+
+            const BASE_MAX_SPEED = 880;
+            const ACCELERATION = 1500;
+            const FRICTION = 42;
+            const BASE_ROTATION_RATE = 8.5;
+            const MIN_ROTATION_FRAC = 0.05;
+            const OPPOSITE_BRAKE_MULT = 3.5;
+
+            // --- Camera ---
+            const camera = { x:0, y:0, targetX:0, targetY:0, zoomTarget:1, zoom:1 };
+            camera.x = player.x - W/2; camera.y = player.y - H/2;
+
+            // --- Joysticks (Left & Right) ---
+            const leftStick = {
+                active: false, touchId: null, baseX:130, baseY:H-140,
+                baseRadius:80, knobX:130, knobY:H-140, knobRadius:34,
+                angle:0, magnitude:0
+            };
+            const rightStick = {
+                active: false, touchId: null, baseX: W-130, baseY: H-140,
+                baseRadius:80, knobX: W-130, knobY: H-140, knobRadius:34,
+                angle:0, magnitude:0, fired: false
+            };
+
+            function updateStickBases() {
+                leftStick.baseY = Math.max(H-140, H*0.76);
+                leftStick.baseX = Math.min(130, W*0.17);
+                rightStick.baseY = leftStick.baseY;
+                rightStick.baseX = Math.max(W-130, W - W*0.17);
+                if (!leftStick.active) { leftStick.knobX=leftStick.baseX; leftStick.knobY=leftStick.baseY; }
+                if (!rightStick.active) { rightStick.knobX=rightStick.baseX; rightStick.knobY=rightStick.baseY; }
+            }
+            updateStickBases();
+
+            function getStickOutput(stick) {
+                if (!stick.active) return {angle:0, magnitude:0};
+                const dx = stick.knobX - stick.baseX, dy = stick.knobY - stick.baseY;
+                const dist = Math.hypot(dx, dy);
+                const maxDist = stick.baseRadius;
+                const clampedDist = Math.min(dist, maxDist);
+                return { angle: Math.atan2(dy, dx), magnitude: clampedDist/maxDist };
+            }
+
+            // --- Collectibles ---
+            const collectibles = [];
+            const MAX_COLLECTIBLES = 14;
+            function spawnCollectible() {
+                const m = 120; let cx,cy, attempts=0;
+                do {
+                    cx = m + Math.random()*(WORLD_SIZE-2*m);
+                    cy = m + Math.random()*(WORLD_SIZE-2*m);
+                    attempts++;
+                } while(attempts<35 && Math.hypot(cx-player.x, cy-player.y)<280);
+                collectibles.push({x:cx,y:cy,radius:17,pulse:Math.random()*Math.PI*2,type:'data'});
+            }
+            function initCollectibles(){ for(let i=0;i<MAX_COLLECTIBLES;i++) spawnCollectible(); }
+
+            // --- Obstacles ---
+            const obstacles = [];
+            const MAX_OBSTACLES = 12;
+            function spawnObstacle() {
+                const m=160; let ox,oy,attempts=0;
+                do {
+                    ox=m+Math.random()*(WORLD_SIZE-2*m);
+                    oy=m+Math.random()*(WORLD_SIZE-2*m);
+                    attempts++;
+                } while(attempts<35 && Math.hypot(ox-player.x, oy-player.y)<380);
+                obstacles.push({x:ox,y:oy,radius:38,pulse:Math.random()*Math.PI*2,type:'ice'});
+            }
+            function initObstacles(){ for(let i=0;i<MAX_OBSTACLES;i++) spawnObstacle(); }
+
+            // --- Drone pickups (missile drops) ---
+            const dronePickups = [];
+            const MAX_DRONE_PICKUPS = 5;
+            function spawnDronePickup() {
+                const m=120; let dx,dy,attempts=0;
+                do {
+                    dx=m+Math.random()*(WORLD_SIZE-2*m);
+                    dy=m+Math.random()*(WORLD_SIZE-2*m);
+                    attempts++;
+                } while(attempts<35 && Math.hypot(dx-player.x, dy-player.y)<280);
+                dronePickups.push({x:dx,y:dy,radius:14,pulse:0,type:'drone_pickup'});
+            }
+            function initDronePickups(){ for(let i=0;i<MAX_DRONE_PICKUPS;i++) spawnDronePickup(); }
+
+            // --- Drones following player ---
+            const drones = [];
+            const MAX_DRONES = 3;
+
+            // --- Particles ---
+            const particles = [];
+            const MAX_PARTICLES = 350;
+            function spawnParticles(x,y,count,color,baseSpeed,lifeRange,sizeRange=[1.5,4.5]){
+                for(let i=0;i<count;i++){
+                    if(particles.length>=MAX_PARTICLES) break;
+                    const a=Math.random()*Math.PI*2, spd=baseSpeed*(0.4+Math.random()*1.2);
+                    particles.push({
+                        x,y, vx:Math.cos(a)*spd, vy:Math.sin(a)*spd,
+                        life:lifeRange[0]+Math.random()*(lifeRange[1]-lifeRange[0]),
+                        maxLife:lifeRange[1], color,
+                        size:sizeRange[0]+Math.random()*(sizeRange[1]-sizeRange[0])
+                    });
+                }
+            }
+
+            // --- Trail ---
+            const trailPoints = [];
+            const MAX_TRAIL = 80;
+            let trailTimer = 0;
+
+            // --- Game State ---
+            let score = 0, comboCount=0, comboTimer=0;
+            const COMBO_TIMEOUT = 2.2;
+            let screenShake=0, hitFlash=0;
+            let isDrifting=false, driftIntensity=0, driftScoreTimer=0;
+            let nearMissCooldown=0;
+            let gameOver = false;
+            let lastTime = performance.now();
+            let instructionsOpacity=1, instructionsFading=false, gameStarted=false;
+
+            // --- Utility ---
+            function normalizeAngle(a){ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; }
+            function angleDiff(a,b){ return normalizeAngle(b-a); }
+            function lerp(a,b,t){ return a+(b-a)*t; }
+            function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+            function worldToScreen(wx,wy){ return {x:wx-camera.x, y:wy-camera.y}; }
+            function isOnScreen(sx,sy,m=60){ return sx>-m && sx<W+m && sy>-m && sy<H+m; }
+
+            // --- Input Handling ---
+            function getTouchPos(t){ return {x:t.clientX, y:t.clientY}; }
+            function stickZoneTest(x,y,stick){
+                const zr = stick.baseRadius*2.4;
+                return Math.hypot(x-stick.baseX, y-stick.baseY) < zr;
+            }
+
+            canvas.addEventListener('touchstart', (e)=>{
+                e.preventDefault();
+                if(gameOver){ restartGame(); return; }
+                if(!gameStarted){ gameStarted=true; instructionsFading=true; }
+                for(const t of e.changedTouches){
+                    const p = getTouchPos(t);
+                    if(!leftStick.active && stickZoneTest(p.x,p.y,leftStick)){
+                        leftStick.active=true; leftStick.touchId=t.identifier;
+                        leftStick.knobX=p.x; leftStick.knobY=p.y;
+                        clampKnob(leftStick);
+                    } else if(!rightStick.active && stickZoneTest(p.x,p.y,rightStick)){
+                        rightStick.active=true; rightStick.touchId=t.identifier;
+                        rightStick.knobX=p.x; rightStick.knobY=p.y;
+                        rightStick.fired = false;
+                        clampKnob(rightStick);
+                    }
+                }
+            }, {passive:false});
+
+            canvas.addEventListener('touchmove', (e)=>{
+                e.preventDefault();
+                for(const t of e.changedTouches){
+                    if(leftStick.active && t.identifier===leftStick.touchId){
+                        leftStick.knobX=getTouchPos(t).x; leftStick.knobY=getTouchPos(t).y;
+                        clampKnob(leftStick);
+                    }
+                    if(rightStick.active && t.identifier===rightStick.touchId){
+                        rightStick.knobX=getTouchPos(t).x; rightStick.knobY=getTouchPos(t).y;
+                        clampKnob(rightStick);
+                    }
+                }
+            }, {passive:false});
+
+            canvas.addEventListener('touchend', (e)=>{
+                e.preventDefault();
+                for(const t of e.changedTouches){
+                    if(leftStick.active && t.identifier===leftStick.touchId){
+                        leftStick.active=false; leftStick.touchId=null;
+                        leftStick.knobX=leftStick.baseX; leftStick.knobY=leftStick.baseY;
+                    }
+                    if(rightStick.active && t.identifier===rightStick.touchId){
+                        // Fire drone on release if aimed
+                        const out = getStickOutput(rightStick);
+                        if(out.magnitude > 0.2 && drones.length>0 && !gameOver){
+                            fireDrone(out.angle);
+                        }
+                        rightStick.active=false; rightStick.touchId=null;
+                        rightStick.knobX=rightStick.baseX; rightStick.knobY=rightStick.baseY;
+                        rightStick.fired = false;
+                    }
+                }
+            }, {passive:false});
+
+            canvas.addEventListener('touchcancel', (e)=>{
+                e.preventDefault();
+                leftStick.active=false; rightStick.active=false;
+                leftStick.knobX=leftStick.baseX; leftStick.knobY=leftStick.baseY;
+                rightStick.knobX=rightStick.baseX; rightStick.knobY=rightStick.baseY;
+            }, {passive:false});
+
+            function clampKnob(stick){
+                const dx=stick.knobX-stick.baseX, dy=stick.knobY-stick.baseY;
+                const d=Math.hypot(dx,dy);
+                if(d>stick.baseRadius){
+                    stick.knobX=stick.baseX+(dx/d)*stick.baseRadius;
+                    stick.knobY=stick.baseY+(dy/d)*stick.baseRadius;
+                }
+            }
+
+            // Mouse support
+            let mouseLeft=false, mouseRight=false;
+            canvas.addEventListener('mousedown',(e)=>{
+                if(gameOver){ restartGame(); return; }
+                if(!gameStarted){ gameStarted=true; instructionsFading=true; }
+                const p={x:e.clientX,y:e.clientY};
+                if(stickZoneTest(p.x,p.y,leftStick)){
+                    mouseLeft=true; leftStick.active=true; leftStick.touchId='mouseL';
+                    leftStick.knobX=p.x; leftStick.knobY=p.y; clampKnob(leftStick);
+                } else if(stickZoneTest(p.x,p.y,rightStick)){
+                    mouseRight=true; rightStick.active=true; rightStick.touchId='mouseR';
+                    rightStick.knobX=p.x; rightStick.knobY=p.y; rightStick.fired=false; clampKnob(rightStick);
+                }
+            });
+            window.addEventListener('mousemove',(e)=>{
+                const p={x:e.clientX,y:e.clientY};
+                if(mouseLeft && leftStick.active){
+                    leftStick.knobX=p.x; leftStick.knobY=p.y; clampKnob(leftStick);
+                }
+                if(mouseRight && rightStick.active){
+                    rightStick.knobX=p.x; rightStick.knobY=p.y; clampKnob(rightStick);
+                }
+            });
+            window.addEventListener('mouseup',(e)=>{
+                if(mouseRight && rightStick.active){
+                    const out = getStickOutput(rightStick);
+                    if(out.magnitude>0.2 && drones.length>0 && !gameOver) fireDrone(out.angle);
+                    rightStick.active=false; rightStick.knobX=rightStick.baseX; rightStick.knobY=rightStick.baseY;
+                    rightStick.fired=false; mouseRight=false;
+                }
+                if(mouseLeft && leftStick.active){
+                    leftStick.active=false; leftStick.knobX=leftStick.baseX; leftStick.knobY=leftStick.baseY;
+                    mouseLeft=false;
+                }
+            });
+
+            // --- Drone Firing ---
+            function fireDrone(angle){
+                if(drones.length===0) return;
+                const drone = drones.shift(); // remove first (oldest) drone
+                drone.fired = true;
+                drone.fireAngle = angle;
+                drone.speed = 1200; // rush speed
+                drone.life = 1.5; // max flight time
+                spawnParticles(drone.x, drone.y, 10, '#ffaa00', 200, [0.2,0.5]);
+            }
+
+            // --- Restart ---
+            function restartGame(){
+                player.x=WORLD_HALF; player.y=WORLD_HALF;
+                player.vx=0; player.vy=0; player.speed=0;
+                player.velAngle=0; player.facingAngle=0;
+                player.currentMaxSpeed = BASE_MAX_SPEED;
+                player.maxSpeed = BASE_MAX_SPEED;
+                camera.x=player.x-W/2; camera.y=player.y-H/2;
+                collectibles.length=0; obstacles.length=0; dronePickups.length=0;
+                drones.length=0; particles.length=0; trailPoints.length=0;
+                score=0; comboCount=0; comboTimer=0;
+                screenShake=0; hitFlash=0; isDrifting=false; driftIntensity=0;
+                nearMissCooldown=0;
+                gameOver=false;
+                gameoverEl.classList.remove('active');
+                instructionsOpacity=1; instructionsFading=false; gameStarted=false;
+                instructionsEl.classList.remove('fading'); instructionsEl.style.opacity='1';
+                initCollectibles(); initObstacles(); initDronePickups();
+                updateStickBases();
+            }
+
+            // --- Update ---
+            function update(dt){
+                if(gameOver) return;
+                dt = Math.min(dt,0.12);
+                updateStickBases();
+
+                const leftOut = getStickOutput(leftStick);
+                const targetAngle = leftOut.angle;
+                const targetMag = leftOut.magnitude;
+                const currentSpeed = player.speed;
+                const velAngle = player.velAngle;
+
+                let angDiff = 0;
+                if(leftStick.active && targetMag>0.04) angDiff = angleDiff(velAngle, targetAngle);
+                const absAngDiff = Math.abs(angDiff);
+
+                // Drift detection
+                const driftThreshold = 0.55;
+                isDrifting = (leftStick.active && targetMag>0.08 && currentSpeed>220 && absAngDiff>driftThreshold);
+                driftIntensity = isDrifting ? clamp((absAngDiff-driftThreshold)/1.8,0,1) : Math.max(0, driftIntensity-dt*3);
+
+                // Steering
+                const speedFrac = clamp(currentSpeed / player.maxSpeed, 0, 1);
+                const maxRotationRate = BASE_ROTATION_RATE * (1 - (1-MIN_ROTATION_FRAC)*speedFrac);
+                const maxRotThisFrame = maxRotationRate * dt;
+                const actualRotation = clamp(angDiff, -maxRotThisFrame, maxRotThisFrame);
+                player.velAngle += actualRotation;
+                player.velAngle = normalizeAngle(player.velAngle);
+
+                if(leftStick.active && targetMag>0.04){
+                    const faceDiff = angleDiff(player.facingAngle, targetAngle);
+                    player.facingAngle += clamp(faceDiff, -12*dt, 12*dt);
+                    player.facingAngle = normalizeAngle(player.facingAngle);
+                } else if(currentSpeed>10){
+                    const faceDiff = angleDiff(player.facingAngle, player.velAngle);
+                    player.facingAngle += clamp(faceDiff, -6*dt, 6*dt);
+                    player.facingAngle = normalizeAngle(player.facingAngle);
+                }
+
+                // Speed
+                let targetSpeed = targetMag * player.maxSpeed;
+                if(leftStick.active && targetMag>0.04 && currentSpeed>30){
+                    if(absAngDiff>2.4) targetSpeed*=0.08;
+                    else if(absAngDiff>1.5) targetSpeed*=0.2;
+                    else if(absAngDiff>0.8) targetSpeed*=0.4;
+                    else if(absAngDiff>0.4) targetSpeed*=0.65;
+                }
+                let braking = false;
+                if(leftStick.active && targetMag>0.2 && absAngDiff>2.7 && currentSpeed>60){
+                    braking=true; targetSpeed=0;
+                }
+                if(leftStick.active && targetMag>0.03){
+                    const accel = ACCELERATION*dt;
+                    if(braking) player.speed = Math.max(0, currentSpeed-ACCELERATION*OPPOSITE_BRAKE_MULT*dt);
+                    else if(currentSpeed<targetSpeed) player.speed = Math.min(currentSpeed+accel, targetSpeed);
+                    else player.speed = Math.max(currentSpeed-accel*0.5, targetSpeed);
+                } else {
+                    player.speed = Math.max(0, currentSpeed-FRICTION*dt);
+                }
+
+                player.vx = Math.cos(player.velAngle)*player.speed;
+                player.vy = Math.sin(player.velAngle)*player.speed;
+                player.x += player.vx*dt;
+                player.y += player.vy*dt;
+
+                // Wall collision & crash penalty
+                let wallHit = false;
+                const bounceRetention = 0.55;
+                if(player.x<WALL_MARGIN){
+                    player.x=WALL_MARGIN; player.vx=Math.abs(player.vx)*bounceRetention;
+                    player.speed=Math.hypot(player.vx,player.vy); player.velAngle=Math.atan2(player.vy,player.vx); wallHit=true;
+                }
+                if(player.x>WORLD_SIZE-WALL_MARGIN){
+                    player.x=WORLD_SIZE-WALL_MARGIN; player.vx=-Math.abs(player.vx)*bounceRetention;
+                    player.speed=Math.hypot(player.vx,player.vy); player.velAngle=Math.atan2(player.vy,player.vx); wallHit=true;
+                }
+                if(player.y<WALL_MARGIN){
+                    player.y=WALL_MARGIN; player.vy=Math.abs(player.vy)*bounceRetention;
+                    player.speed=Math.hypot(player.vx,player.vy); player.velAngle=Math.atan2(player.vy,player.vx); wallHit=true;
+                }
+                if(player.y>WORLD_SIZE-WALL_MARGIN){
+                    player.y=WORLD_SIZE-WALL_MARGIN; player.vy=-Math.abs(player.vy)*bounceRetention;
+                    player.speed=Math.hypot(player.vx,player.vy); player.velAngle=Math.atan2(player.vy,player.vx); wallHit=true;
+                }
+                if(wallHit){
+                    player.vx=Math.cos(player.velAngle)*player.speed; player.vy=Math.sin(player.velAngle)*player.speed;
+                    screenShake=Math.max(screenShake,9);
+                    spawnParticles(player.x,player.y,20,'#ff3366',250,[0.2,0.8],[2,7]);
+                    comboCount=0; comboTimer=0;
+                    reduceMaxSpeed(20);
+                }
+
+                // Obstacle collision
+                for(let i=obstacles.length-1;i>=0;i--){
+                    const obs=obstacles[i];
+                    const dist=Math.hypot(player.x-obs.x, player.y-obs.y);
+                    if(dist < obs.radius+14){
+                        const pushAngle=Math.atan2(player.y-obs.y, player.x-obs.x);
+                        player.x=obs.x+Math.cos(pushAngle)*(obs.radius+14);
+                        player.y=obs.y+Math.sin(pushAngle)*(obs.radius+14);
+                        player.speed*=0.2;
+                        player.vx=Math.cos(player.velAngle)*player.speed; player.vy=Math.sin(player.velAngle)*player.speed;
+                        comboCount=0; comboTimer=0;
+                        screenShake=Math.max(screenShake,14); hitFlash=0.4;
+                        spawnParticles(obs.x,obs.y,30,'#ff0044',350,[0.3,1.2],[2,8]);
+                        reduceMaxSpeed(25);
+                        break;
+                    }
+                }
+
+                // Crash penalty function
+                function reduceMaxSpeed(amount){
+                    player.currentMaxSpeed = Math.max(0, player.currentMaxSpeed - amount);
+                    player.maxSpeed = player.currentMaxSpeed;
+                    if(player.currentMaxSpeed <= 0){
+                        gameOver = true;
+                        gameoverEl.classList.add('active');
+                        player.speed = 0;
+                    }
+                }
+
+                // Trail
+                trailTimer+=dt;
+                const trailInterval = isDrifting?0.012:0.03;
+                if(player.speed>40 && trailTimer>trailInterval){
+                    trailTimer=0;
+                    trailPoints.push({x:player.x,y:player.y,life:isDrifting?0.7:0.45,maxLife:isDrifting?0.7:0.45,speed:player.speed,drifting:isDrifting});
+                    if(trailPoints.length>MAX_TRAIL) trailPoints.shift();
+                }
+                for(let i=trailPoints.length-1;i>=0;i--){
+                    trailPoints[i].life-=dt;
+                    if(trailPoints[i].life<=0) trailPoints.splice(i,1);
+                }
+
+                // Collectibles
+                for(let i=collectibles.length-1;i>=0;i--){
+                    const c=collectibles[i];
+                    if(Math.hypot(player.x-c.x, player.y-c.y) < c.radius+16){
+                        const speedBonus=Math.floor(player.speed/30);
+                        let points=10+speedBonus;
+                        if(isDrifting) points=Math.floor(points*2.5);
+                        score+=points;
+                        comboCount++; comboTimer=COMBO_TIMEOUT;
+                        spawnParticles(c.x,c.y,20,isDrifting?'#ff44cc':'#00ffff',300,[0.3,1.0],[2,6]);
+                        collectibles.splice(i,1);
+                        spawnCollectible();
+                    }
+                }
+
+                // Drone pickups
+                for(let i=dronePickups.length-1;i>=0;i--){
+                    const dp=dronePickups[i];
+                    if(Math.hypot(player.x-dp.x, player.y-dp.y) < dp.radius+14){
+                        if(drones.length < MAX_DRONES){
+                            drones.push({x:player.x, y:player.y, angle:player.velAngle, fired:false, fireAngle:0, speed:0, life:0});
+                            spawnParticles(dp.x,dp.y,15,'#ffaa00',220,[0.2,0.6]);
+                        }
+                        dronePickups.splice(i,1);
+                        spawnDronePickup();
+                    }
+                }
+
+                // Drone behavior
+                for(let i=drones.length-1;i>=0;i--){
+                    const d = drones[i];
+                    if(d.fired){
+                        // flying toward target
+                        d.x += Math.cos(d.fireAngle)*d.speed*dt;
+                        d.y += Math.sin(d.fireAngle)*d.speed*dt;
+                        d.life -= dt;
+                        // Check impact with obstacles/walls
+                        let exploded = false;
+                        // Wall hit
+                        if(d.x<0||d.x>WORLD_SIZE||d.y<0||d.y>WORLD_SIZE) exploded=true;
+                        for(let j=obstacles.length-1;j>=0;j--){
+                            const obs=obstacles[j];
+                            if(Math.hypot(d.x-obs.x, d.y-obs.y) < obs.radius+10){
+                                explodeDrone(d, obs);
+                                obstacles.splice(j,1);
+                                exploded=true; break;
+                            }
+                        }
+                        // Hit collectibles too
+                        for(let j=collectibles.length-1;j>=0;j--){
+                            const c=collectibles[j];
+                            if(Math.hypot(d.x-c.x, d.y-c.y) < c.radius+10){
+                                explodeDrone(d, c);
+                                collectibles.splice(j,1);
+                                exploded=true; break;
+                            }
+                        }
+                        if(exploded || d.life<=0){
+                            if(!exploded) explodeDrone(d, null); // time out
+                            drones.splice(i,1);
+                        }
+                    } else {
+                        // Follow player with delay
+                        const targetDist = 50;
+                        const angleToPlayer = Math.atan2(player.y - d.y, player.x - d.x);
+                        const dist = Math.hypot(player.x-d.x, player.y-d.y);
+                        if(dist > targetDist+10){
+                            d.x += Math.cos(angleToPlayer)*400*dt;
+                            d.y += Math.sin(angleToPlayer)*400*dt;
+                        }
+                        d.angle = angleToPlayer;
+                    }
+                }
+                if(drones.length>0) droneCountEl.textContent = drones.length;
+
+                // Explosion radius effect
+                function explodeDrone(drone, hitTarget){
+                    const ex = drone.x, ey = drone.y;
+                    spawnParticles(ex,ey,35,'#ffaa00',400,[0.3,1.2],[3,8]);
+                    screenShake = Math.max(screenShake, 12);
+                    // Destroy obstacles in radius
+                    const radius = 90;
+                    for(let i=obstacles.length-1;i>=0;i--){
+                        const obs=obstacles[i];
+                        if(Math.hypot(ex-obs.x, ey-obs.y) < radius){
+                            spawnParticles(obs.x,obs.y,15,'#ff0044',250,[0.2,0.7]);
+                            obstacles.splice(i,1);
+                        }
+                    }
+                    for(let i=collectibles.length-1;i>=0;i--){
+                        const c=collectibles[i];
+                        if(Math.hypot(ex-c.x, ey-c.y) < radius){
+                            spawnParticles(c.x,c.y,10,'#00ffff',200,[0.2,0.6]);
+                            collectibles.splice(i,1);
+                        }
+                    }
+                    // Respawn some obstacles later
+                    for(let i=obstacles.length; i<MAX_OBSTACLES; i++) spawnObstacle();
+                    for(let i=collectibles.length; i<MAX_COLLECTIBLES; i++) spawnCollectible();
+                }
+
+                // Drift scoring
+                if(isDrifting){
+                    driftScoreTimer+=dt;
+                    if(driftScoreTimer>0.25){
+                        driftScoreTimer=0;
+                        score+=Math.floor(driftIntensity*3)+1;
+                    }
+                } else driftScoreTimer=0;
+
+                // Near miss
+                nearMissCooldown=Math.max(0,nearMissCooldown-dt);
+                if(nearMissCooldown<=0){
+                    for(const obs of obstacles){
+                        const dist=Math.hypot(player.x-obs.x, player.y-obs.y);
+                        if(dist<obs.radius+45 && dist>obs.radius+14 && player.speed>200){
+                            nearMissCooldown=0.6;
+                            score+=Math.floor(player.speed/20);
+                            spawnParticles(player.x,player.y,8,'#ffdd00',120,[0.15,0.5],[1,3]);
+                            break;
+                        }
+                    }
+                }
+
+                if(comboTimer>0){ comboTimer-=dt; if(comboTimer<=0) comboCount=0; }
+
+                screenShake=Math.max(0,screenShake-dt*16);
+                hitFlash=Math.max(0,hitFlash-dt*3);
+
+                // Camera
+                const camLagSpeed = lerp(6,2.5, clamp(currentSpeed/player.maxSpeed,0,1));
+                camera.targetX=player.x-W/2; camera.targetY=player.y-H/2;
+                camera.x=lerp(camera.x,camera.targetX,camLagSpeed*dt);
+                camera.y=lerp(camera.y,camera.targetY,camLagSpeed*dt);
+                camera.zoomTarget=lerp(1,0.82, clamp((currentSpeed-300)/500,0,1));
+                camera.zoom=lerp(camera.zoom,camera.zoomTarget,3*dt);
+                if(screenShake>0.1){
+                    camera.x+=(Math.random()-0.5)*screenShake*2.5;
+                    camera.y+=(Math.random()-0.5)*screenShake*2.5;
+                }
+
+                // Particles update
+                for(let i=particles.length-1;i>=0;i--){
+                    const p=particles[i]; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt;
+                    if(p.life<=0) particles.splice(i,1);
+                }
+                // Drone sparks
+                if(isDrifting && player.speed>300){
+                    if(Math.random()<dt/(0.04/driftIntensity)){
+                        const bx=player.x-Math.cos(player.velAngle)*20, by=player.y-Math.sin(player.velAngle)*20;
+                        const sa=player.velAngle+Math.PI+(Math.random()-0.5)*1.8;
+                        particles.push({x:bx,y:by,vx:Math.cos(sa)*player.speed*0.3,vy:Math.sin(sa)*player.speed*0.3,life:0.2+Math.random()*0.5,maxLife:0.7,color:'#ff44cc',size:1+Math.random()*4});
+                    }
+                }
+
+                for(const c of collectibles) c.pulse+=dt*4;
+                for(const o of obstacles) o.pulse+=dt*3.2;
+                for(const dp of dronePickups) dp.pulse+=dt*5;
+
+                if(instructionsFading && instructionsOpacity>0){
+                    instructionsOpacity=Math.max(0,instructionsOpacity-dt*1.8);
+                    instructionsEl.style.opacity=instructionsOpacity;
+                    if(instructionsOpacity<=0) instructionsEl.classList.add('fading');
+                }
+                speedValEl.textContent = Math.floor(player.speed);
+                maxSpdValEl.textContent = Math.floor(player.currentMaxSpeed);
+                droneCountEl.textContent = drones.length;
+                if(isDrifting) hudDrift.classList.add('active'); else hudDrift.classList.remove('active');
+            }
+
+            // --- Render ---
+            function drawGrid(){
+                const gs=90; const sx0=Math.floor(camera.x/gs)*gs, sy0=Math.floor(camera.y/gs)*gs;
+                ctx.strokeStyle='rgba(0,255,255,0.06)'; ctx.lineWidth=1;
+                for(let wx=sx0; wx<camera.x+W+gs; wx+=gs){ if(wx<0||wx>WORLD_SIZE)continue; ctx.beginPath(); ctx.moveTo(wx-camera.x,0); ctx.lineTo(wx-camera.x,H); ctx.stroke(); }
+                for(let wy=sy0; wy<camera.y+H+gs; wy+=gs){ if(wy<0||wy>WORLD_SIZE)continue; ctx.beginPath(); ctx.moveTo(0,wy-camera.y); ctx.lineTo(W,wy-camera.y); ctx.stroke(); }
+                const mgs=360, msx=Math.floor(camera.x/mgs)*mgs, msy=Math.floor(camera.y/mgs)*mgs;
+                ctx.strokeStyle='rgba(255,0,170,0.12)'; ctx.lineWidth=1.5;
+                for(let wx=msx; wx<camera.x+W+mgs; wx+=mgs){ if(wx<0||wx>WORLD_SIZE)continue; ctx.beginPath(); ctx.moveTo(wx-camera.x,0); ctx.lineTo(wx-camera.x,H); ctx.stroke(); }
+                for(let wy=msy; wy<camera.y+H+mgs; wy+=mgs){ if(wy<0||wy>WORLD_SIZE)continue; ctx.beginPath(); ctx.moveTo(0,wy-camera.y); ctx.lineTo(W,wy-camera.y); ctx.stroke(); }
+            }
+            function drawWorldBorder(){
+                const tl=worldToScreen(0,0);
+                ctx.strokeStyle='#ff00aa'; ctx.lineWidth=4; ctx.shadowColor='#ff00aa'; ctx.shadowBlur=25;
+                ctx.strokeRect(tl.x,tl.y,WORLD_SIZE,WORLD_SIZE); ctx.shadowBlur=0;
+                ctx.strokeStyle='rgba(255,0,170,0.3)'; ctx.lineWidth=1; ctx.setLineDash([20,30]);
+                ctx.strokeRect(tl.x+6,tl.y+6,WORLD_SIZE-12,WORLD_SIZE-12); ctx.setLineDash([]);
+            }
+            function drawCursor(){
+                const sx=player.x-camera.x, sy=player.y-camera.y, size=24;
+                ctx.save(); ctx.translate(sx,sy); ctx.rotate(player.facingAngle);
+                if(isDrifting){ ctx.shadowColor='#ff44cc'; ctx.shadowBlur=35+driftIntensity*30; }
+                else { ctx.shadowColor='#00ffff'; ctx.shadowBlur=20; }
+                ctx.fillStyle=isDrifting?'#ff44cc':'#00ffff';
+                ctx.beginPath(); ctx.moveTo(size,0); ctx.lineTo(-size*0.55,-size*0.6); ctx.lineTo(-size*0.22,-size*0.14); ctx.lineTo(-size*0.22,size*0.14); ctx.lineTo(-size*0.55,size*0.6); ctx.closePath(); ctx.fill();
+                ctx.shadowBlur=6; ctx.fillStyle='#ffffff';
+                ctx.beginPath(); ctx.moveTo(size*0.65,0); ctx.lineTo(-size*0.15,-size*0.28); ctx.lineTo(-size*0.03,0); ctx.lineTo(-size*0.15,size*0.28); ctx.closePath(); ctx.fill();
+                ctx.shadowBlur=0; ctx.restore();
+                if(player.speed>250){
+                    const gi=clamp((player.speed-250)/550,0,1);
+                    ctx.save(); ctx.translate(sx,sy);
+                    ctx.shadowColor=isDrifting?'#ff44cc':'#00ffff'; ctx.shadowBlur=35*gi;
+                    ctx.strokeStyle=isDrifting?`rgba(255,68,204,${0.6*gi})`:`rgba(0,255,255,${0.5*gi})`;
+                    ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(0,0,size*1.6,0,Math.PI*2); ctx.stroke();
+                    ctx.shadowBlur=0; ctx.restore();
+                }
+            }
+            function drawTrail(){
+                if(trailPoints.length<2)return;
+                for(let i=1;i<trailPoints.length;i++){
+                    const t0=trailPoints[i-1], t1=trailPoints[i];
+                    const a0=clamp(t0.life/t0.maxLife,0,1), a1=clamp(t1.life/t1.maxLife,0,1), avgA=(a0+a1)/2;
+                    if(avgA<0.015)continue;
+                    const s0=worldToScreen(t0.x,t0.y), s1=worldToScreen(t1.x,t1.y);
+                    const isDriftTrail=t0.drifting||t1.drifting;
+                    ctx.strokeStyle=isDriftTrail?`rgba(255,68,204,${avgA*0.8})`:`rgba(0,255,255,${avgA*0.65})`;
+                    ctx.lineWidth=(isDriftTrail?5:3)*avgA+1.5;
+                    ctx.shadowColor=isDriftTrail?`rgba(255,68,204,${avgA*0.7})`:`rgba(0,255,255,${avgA*0.5})`;
+                    ctx.shadowBlur=isDriftTrail?12*avgA:7*avgA; ctx.lineCap='round';
+                    ctx.beginPath(); ctx.moveTo(s0.x,s0.y); ctx.lineTo(s1.x,s1.y); ctx.stroke();
+                    ctx.shadowBlur=0; ctx.lineCap='butt';
+                }
+            }
+            function drawCollectibles(){
+                for(const c of collectibles){
+                    const s=worldToScreen(c.x,c.y); if(!isOnScreen(s.x,s.y,40))continue;
+                    const pulse=1+Math.sin(c.pulse)*0.3, r=c.radius*pulse;
+                    ctx.shadowColor='#00ffff'; ctx.shadowBlur=18;
+                    ctx.fillStyle='rgba(0,255,255,0.2)'; ctx.beginPath(); ctx.arc(s.x,s.y,r+7,0,Math.PI*2); ctx.fill();
+                    ctx.shadowBlur=10; ctx.fillStyle='#00ffff';
+                    ctx.beginPath(); ctx.moveTo(s.x,s.y-r); ctx.lineTo(s.x+r*0.7,s.y); ctx.lineTo(s.x,s.y+r); ctx.lineTo(s.x-r*0.7,s.y); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle='#ffffff'; ctx.shadowBlur=3; ctx.beginPath(); ctx.arc(s.x,s.y,r*0.3,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+                }
+            }
+            function drawObstacles(){
+                for(const obs of obstacles){
+                    const s=worldToScreen(obs.x,obs.y); if(!isOnScreen(s.x,s.y,55))continue;
+                    const pulse=1+Math.sin(obs.pulse)*0.22, r=obs.radius*pulse;
+                    ctx.shadowColor='#ff0044'; ctx.shadowBlur=28;
+                    ctx.fillStyle='rgba(255,0,50,0.18)'; ctx.beginPath(); ctx.arc(s.x,s.y,r+9,0,Math.PI*2); ctx.fill();
+                    ctx.shadowBlur=16; ctx.fillStyle='rgba(255,20,50,0.7)'; ctx.strokeStyle='#ff3355'; ctx.lineWidth=2.5;
+                    ctx.beginPath(); const sides=6;
+                    for(let i=0;i<sides;i++){ const a=(Math.PI*2/sides)*i-Math.PI/2; const px=s.x+Math.cos(a)*r, py=s.y+Math.sin(a)*r; if(i===0)ctx.moveTo(px,py); else ctx.lineTo(px,py); }
+                    ctx.closePath(); ctx.fill(); ctx.stroke();
+                    ctx.strokeStyle='#ff6688'; ctx.lineWidth=2; ctx.shadowBlur=5;
+                    ctx.beginPath(); ctx.moveTo(s.x-r*0.5,s.y-r*0.5); ctx.lineTo(s.x+r*0.5,s.y+r*0.5); ctx.moveTo(s.x+r*0.5,s.y-r*0.5); ctx.lineTo(s.x-r*0.5,s.y+r*0.5); ctx.stroke(); ctx.shadowBlur=0;
+                }
+            }
+            function drawDronePickups(){
+                for(const dp of dronePickups){
+                    const s=worldToScreen(dp.x,dp.y); if(!isOnScreen(s.x,s.y,35))continue;
+                    const pulse=1+Math.sin(dp.pulse)*0.25, r=dp.radius*pulse;
+                    ctx.shadowColor='#ffaa00'; ctx.shadowBlur=15;
+                    ctx.fillStyle='rgba(255,170,0,0.25)'; ctx.beginPath(); ctx.arc(s.x,s.y,r+5,0,Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#ffaa00'; ctx.shadowBlur=8;
+                    ctx.beginPath(); ctx.moveTo(s.x,s.y-r); ctx.lineTo(s.x+r*0.6,s.y); ctx.lineTo(s.x,s.y+r); ctx.lineTo(s.x-r*0.6,s.y); ctx.closePath(); ctx.fill();
+                    ctx.fillStyle='#ffffff'; ctx.shadowBlur=3; ctx.beginPath(); ctx.arc(s.x,s.y,r*0.25,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+                }
+            }
+            function drawDrones(){
+                for(const d of drones){
+                    const s=worldToScreen(d.x,d.y); if(!isOnScreen(s.x,s.y,30))continue;
+                    ctx.save(); ctx.translate(s.x,s.y);
+                    if(d.fired){
+                        ctx.rotate(d.fireAngle);
+                        ctx.shadowColor='#ffaa00'; ctx.shadowBlur=20;
+                        ctx.fillStyle='#ffaa00';
+                        ctx.beginPath(); ctx.moveTo(14,0); ctx.lineTo(-7,-8); ctx.lineTo(-4,0); ctx.lineTo(-7,8); ctx.closePath(); ctx.fill();
+                    } else {
+                        ctx.rotate(d.angle);
+                        ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12;
+                        ctx.fillStyle='#ffaa00';
+                        ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+                        ctx.fillStyle='#ffffff'; ctx.shadowBlur=4; ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fill();
+                    }
+                    ctx.shadowBlur=0; ctx.restore();
+                }
+            }
+            function drawParticles(){
+                for(const p of particles){
+                    const s=worldToScreen(p.x,p.y); if(!isOnScreen(s.x,s.y,20))continue;
+                    const alpha=clamp(p.life/p.maxLife,0,1);
+                    let fillColor;
+                    if(p.color.startsWith('#')){
+                        const r=parseInt(p.color.slice(1,3),16), g=parseInt(p.color.slice(3,5),16), b=parseInt(p.color.slice(5,7),16);
+                        fillColor=`rgba(${r},${g},${b},${alpha})`;
+                    } else fillColor=p.color;
+                    ctx.fillStyle=fillColor; ctx.shadowColor=fillColor; ctx.shadowBlur=5*alpha;
+                    ctx.beginPath(); ctx.arc(s.x,s.y,p.size*alpha,0,Math.PI*2); ctx.fill();
+                }
+                ctx.shadowBlur=0;
+            }
+            function drawJoysticks(){
+                [leftStick,rightStick].forEach(stick=>{
+                    const bx=stick.baseX, by=stick.baseY, kx=stick.knobX, ky=stick.knobY;
+                    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.strokeStyle='rgba(255,255,255,0.3)'; ctx.lineWidth=2;
+                    ctx.beginPath(); ctx.arc(bx,by,stick.baseRadius,0,Math.PI*2); ctx.fill(); ctx.stroke();
+                    ctx.strokeStyle='rgba(255,0,170,0.4)'; ctx.lineWidth=1; ctx.setLineDash([10,14]);
+                    ctx.beginPath(); ctx.arc(bx,by,stick.baseRadius*0.68,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+                    const grad=ctx.createRadialGradient(kx,ky,0,kx,ky,stick.knobRadius);
+                    grad.addColorStop(0,'rgba(255,0,170,0.85)'); grad.addColorStop(0.5,'rgba(200,0,120,0.55)'); grad.addColorStop(1,'rgba(80,0,50,0.3)');
+                    ctx.fillStyle=grad; ctx.shadowColor='#ff00aa'; ctx.shadowBlur=20;
+                    ctx.beginPath(); ctx.arc(kx,ky,stick.knobRadius,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+                    ctx.fillStyle='rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(kx-7,ky-9,stick.knobRadius*0.3,0,Math.PI*2); ctx.fill();
+                });
+            }
+            function drawHUD(){
+                ctx.fillStyle='#ffffff'; ctx.font='bold 21px "Courier New","SF Mono",monospace'; ctx.textAlign='right';
+                ctx.shadowColor='#00ffff'; ctx.shadowBlur=10; ctx.fillText(`◈ ${score.toString().padStart(6,'0')}`,W-30,50); ctx.shadowBlur=0;
+                if(comboCount>2){ ctx.fillStyle='#ffff00'; ctx.font='bold 15px "Courier New","SF Mono",monospace'; ctx.shadowColor='#ffff00'; ctx.shadowBlur=12; ctx.fillText(`COMBO x${comboCount}`,W-30,76); ctx.shadowBlur=0; }
+                const barX=W-185,barY=H-42,barW=155,barH=9;
+                const sf=clamp(player.speed/player.maxSpeed,0,1);
+                ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(barX-3,barY-3,barW+6,barH+6);
+                ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1; ctx.strokeRect(barX-3,barY-3,barW+6,barH+6);
+                let barColor; if(sf<0.35)barColor='#00ff88'; else if(sf<0.7)barColor='#ffcc00'; else barColor='#ff3366';
+                const grad=ctx.createLinearGradient(barX,0,barX+barW,0); grad.addColorStop(0,barColor); grad.addColorStop(1,barColor.replace('ff','cc'));
+                ctx.fillStyle=grad; ctx.fillRect(barX,barY,barW*sf,barH);
+                ctx.shadowColor=barColor; ctx.shadowBlur=10; ctx.fillStyle=barColor; ctx.fillRect(barX+barW*sf-4,barY-2,8,barH+4); ctx.shadowBlur=0;
+            }
+            function drawHitFlash(){ if(hitFlash>0.01){ ctx.fillStyle=`rgba(255,0,40,${hitFlash*0.4})`; ctx.fillRect(0,0,W,H); } }
+
+            function render(){
+                ctx.fillStyle='#060612'; ctx.fillRect(0,0,W,H);
+                const vigGrad=ctx.createRadialGradient(W/2,H/2,W*0.5,W/2,H/2,W*0.95);
+                vigGrad.addColorStop(0,'rgba(0,0,0,0)'); vigGrad.addColorStop(1,'rgba(0,0,0,0.6)');
+                ctx.fillStyle=vigGrad; ctx.fillRect(0,0,W,H);
+                ctx.save(); const zx=W/2,zy=H/2; ctx.translate(zx,zy); ctx.scale(camera.zoom,camera.zoom); ctx.translate(-zx,-zy);
+                drawGrid(); drawWorldBorder(); drawTrail(); drawCollectibles(); drawDronePickups(); drawObstacles(); drawDrones(); drawParticles(); drawCursor();
+                ctx.restore();
+                drawHitFlash(); drawJoysticks(); drawHUD();
+                if(gameOver) return;
+                if(!leftStick.active && !gameStarted){
+                    [leftStick,rightStick].forEach(s=>{
+                        const pulse=0.3+Math.sin(performance.now()/900)*0.25;
+                        ctx.strokeStyle=`rgba(255,255,255,${pulse})`; ctx.lineWidth=2.5; ctx.setLineDash([8,10]);
+                        ctx.beginPath(); ctx.arc(s.baseX,s.baseY,s.baseRadius+18,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+                    });
+                }
+            }
+
+            function gameLoop(timestamp){
+                let dt = (timestamp - lastTime)/1000;
+                if(dt<=0)dt=0.016; if(dt>0.15)dt=0.15;
+                lastTime=timestamp;
+                update(dt);
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+
+            function init(){
+                updateStickBases();
+                leftStick.knobX=leftStick.baseX; leftStick.knobY=leftStick.baseY;
+                rightStick.knobX=rightStick.baseX; rightStick.knobY=rightStick.baseY;
+                player.currentMaxSpeed=BASE_MAX_SPEED; player.maxSpeed=BASE_MAX_SPEED;
+                camera.x=player.x-W/2; camera.y=player.y-H/2;
+                collectibles.length=0; obstacles.length=0; dronePickups.length=0; drones.length=0; particles.length=0; trailPoints.length=0;
+                score=0; comboCount=0; comboTimer=0; screenShake=0; hitFlash=0; isDrifting=false; driftIntensity=0; nearMissCooldown=0;
+                gameOver=false; gameoverEl.classList.remove('active');
+                instructionsOpacity=1; instructionsFading=false; gameStarted=false;
+                instructionsEl.classList.remove('fading'); instructionsEl.style.opacity='1';
+                initCollectibles(); initObstacles(); initDronePickups();
+            }
+            init();
+            requestAnimationFrame(gameLoop);
+            console.log('🔥 DRIFT & DESTROY – ARMED 🔥');
+            console.log('🕹️ Left stick: drift  |  Right stick: aim & release to fire drone');
+            console.log('💣 Drones follow you, release right stick to launch them at obstacles!');
+            console.log('💥 Crashes permanently reduce max speed. Survive!');
+        })();
+    </script>
+</body>
+</html>
