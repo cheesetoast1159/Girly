@@ -335,13 +335,16 @@
 
             // --- Drone Firing ---
             function fireDrone(angle){
-                if(drones.length===0) return;
-                const drone = drones.shift(); // remove first (oldest) drone
-                drone.fired = true;
-                drone.fireAngle = angle;
-                drone.speed = 1200; // rush speed
-                drone.life = 1.5; // max flight time
-                spawnParticles(drone.x, drone.y, 10, '#ffaa00', 200, [0.2,0.5]);
+    // Find the first drone that is NOT already fired
+    const drone = drones.find(d => !d.fired);
+    if (!drone) return;   // no available drone
+
+    drone.fired = true;
+    drone.fireAngle = angle;
+    drone.speed = 1200;
+    drone.life = 1.5;
+    spawnParticles(drone.x, drone.y, 10, '#ffaa00', 200, [0.2, 0.5]);
+}
             }
 
             // --- Restart ---
